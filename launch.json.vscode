@@ -1,0 +1,40 @@
+ccat > .vscode/launch.json << 'EOF'
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Run Morphing Program",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/morph_video.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Python: Debug Morphing Program",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/morph_video.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
+EOF
+
+
+
