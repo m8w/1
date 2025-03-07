@@ -32,7 +32,7 @@ pip install numpy pillow opencv-python scipy moviepy
 
 1. Place your images (.jpg, .jpeg, .png, etc.) in your Downloads folder
 2. Place a WAV audio file in your Downloads folder
-3. Run the program:
+3. Run the program(include path to program location on the computer):
    ```bash
    python morph_video.py
    ```
