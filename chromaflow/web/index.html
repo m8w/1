@@ -322,12 +322,15 @@ body.dragging #drop{display:grid}
     <h3>Credit where it is due</h3>
     <p>Chromaflow is an independent, from-scratch homage to the visualizers made by
       <a href="https://www.soundspectrum.com/" target="_blank" rel="noopener noreferrer">SoundSpectrum</a> —
-      <b>G-Force</b>, <b>WhiteCap</b>, <b>SoftSkies</b> and <b>Aeon</b> — and to two pieces of their documentation
-      in particular: the
+      <b>G-Force</b>, <b>WhiteCap</b>, <b>SoftSkies</b> and <b>Aeon</b>, the art of Drew O'Meara and still actively
+      developed — and to two pieces of their documentation in particular: the
       <a href="https://www.soundspectrum.com/g-force/Documentation/config-programming.html" target="_blank" rel="noopener noreferrer">G-Force config programming</a>
-      guide (WaveShapes, FlowFields, ColorMaps) and the
+      guide (WaveShapes, FlowFields, ColorMaps — and the exact five-step per-frame loop this engine follows) and the
       <a href="https://www.soundspectrum.com/aeon/Documentation/PythonCanvas.html" target="_blank" rel="noopener noreferrer">Aeon PythonCanvas</a>
-      drawing API. No SoundSpectrum code, art or presets are used here; the debt is one of ideas, and it is a large one.</p>
+      drawing API (its <code>SetDrawClass</code> / <code>Draw(self, fft, time)</code> scene contract, kept on
+      purpose in the Python build's <code>chromaflow/scene.py</code>). No SoundSpectrum code, art, presets or
+      config syntax are used here; the debt is one of architecture and ideas, not of text — see
+      <code>CREDITS.md</code> in the repository for the full account, and consider trying the real thing.</p>
     <p>Everything else is new work, released into the public domain — see the repository for the
       Python engine that carries the same ideas to the desktop.</p>
     <div class="actions"><button class="prime" id="hClose">Back to the music</button></div>

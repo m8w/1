@@ -158,7 +158,11 @@ reload: `Scene.poll()` re-executes the file when it changes on disk.
 
 ## How it works
 
-Every frame, in this order:
+G-Force's own documentation describes its per-frame loop in five steps: *use
+the current FlowField on the previous frame to generate a new frame; sample
+some audio; draw the current WaveShape and any running particles on the new
+frame; colorize the new frame using the current ColorMap; copy the new frame
+to the screen.* Chromaflow follows the same five, in the same order:
 
 1. **Advect.** The flow-field expressions give a velocity at each pixel; the
    plane is resampled from `p − v·dt`. That is a semi-Lagrangian step, and it is
