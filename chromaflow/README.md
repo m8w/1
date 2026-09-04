@@ -40,18 +40,25 @@ desktop — tick *Share tab audio*), a dropped audio file, or the built-in
 generative demo track so the page is never silent.
 
 **Keys.** `Space` next preset · `←/→` previous/next · `1`–`8` jump ·
-`A` auto-VJ · `R` randomise a fresh look · `C` console · `H` cinema mode ·
-`F` fullscreen · `M` cycle source · `[` `]` particle count · `P` pause ·
-`?` help and credits.
+`A` auto-VJ (fullscreen, console hidden, presets switch on phrase changes) ·
+`R` randomise a fresh look · `C` console · `H` cinema mode · `F` fullscreen ·
+`M` cycle source · `[` `]` particle count · `P` pause · `?` help and credits.
 
 **Pointer, and everything else.** Drag to push the flow field, click to
-detonate, scroll to zoom. Plug in a MIDI controller and CC 1–8 become the
-variables `a0`–`a7`, live in every expression. A gamepad's right stick steers
-spin and zoom. On a phone, enable tilt.
+detonate, scroll to zoom. Two knob sliders in the Code tab (`a0`, `a1`) are
+adjustable by hand for equations that want a parameter with no MIDI gear
+required; plug in a controller and CC 1–8 take over the same eight slots
+(`a0`–`a7`), live in every expression. A gamepad's right stick steers spin
+and zoom. On a phone, enable tilt.
 
-**Sharing.** *Copy share link* in the Code tab packs the whole look — every
-expression and every changed knob — into the URL fragment. Nothing is uploaded;
-the link is the preset.
+**Saving your own equations.** The Code tab is not just for looking —
+*Save this equation…* names and keeps a design in this browser (`localStorage`;
+saving again under the same name overwrites it), listed under *My presets* to
+reload with one click. *Export all* copies every saved design as JSON to the
+clipboard and *Import* reads it back in, which is how you move designs between
+browsers or back them up before clearing site data. *Copy share link* packs
+one look — every expression and every changed knob — into a URL instead;
+nothing in any of this is ever uploaded.
 
 ## Writing a look
 

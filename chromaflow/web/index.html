@@ -89,6 +89,9 @@ h4:first-child{margin-top:2px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .chip{padding:7px 8px;font-size:11.5px;text-align:left;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chip.on{border-color:var(--accent);color:var(--accent)}
+.savedRow{display:flex;gap:6px;margin:6px 0}
+.savedRow .chip{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.savedRow button.icon{width:28px;padding:6px 0;flex:0 0 auto}
 .sw{display:flex;gap:4px;flex-wrap:wrap}
 .sw button{width:30px;height:22px;padding:0;border-radius:6px;background-size:cover}
 
@@ -215,7 +218,12 @@ body.dragging #drop{display:grid}
 
   <div class="pane" id="pCode">
     <p class="hint">Live config, in the spirit of G-Force <i>configs</i>. Edit an expression and it recompiles the
-      GPU shader as you type. Variables: <code>x y r th t s w mag bass mid treb beat level asp</code>.</p>
+      GPU shader as you type. Variables: <code>x y r th t s w mag bass mid treb beat level asp</code> ·
+      <code>phase bpm hue</code> (song structure) · <code>a0…a7</code> (the two knobs below, or a MIDI
+      controller) · <code>mx my mdown</code> (pointer position and click).</p>
+
+    <div class="row"><label>Knob 1 · a0</label><input type="range" id="uK0" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Knob 2 · a1</label><input type="range" id="uK1" min="0" max="1" step=".01"><output></output></div>
 
     <div class="lbl"><b>Flow field · dx</b><i>source = f(dest)</i></div>
     <textarea id="eFX" spellcheck="false"></textarea>
@@ -235,8 +243,18 @@ body.dragging #drop{display:grid}
       <button id="bRevert" class="chip">Revert to preset</button>
       <button id="bShare" class="chip">Copy share link</button>
     </div>
+    <button id="bSaveNew" class="chip" style="width:100%;margin-top:6px;text-align:center">💾 Save this equation…</button>
     <p class="hint">Functions: sin cos tan asin acos atan atan2 abs sqrt pow exp log min max clamp mix
       floor ceil fract sign mod step smoothstep hypot wrap tri saw pulse noise rnd sq.</p>
+
+    <div class="lbl" style="margin-top:16px"><b>My presets</b><i id="savedCount"></i></div>
+    <div id="savedList"></div>
+    <div class="grid2" style="margin-top:6px">
+      <button id="bExport" class="chip">⬇ Export all</button>
+      <button id="bImport" class="chip">⬆ Import</button>
+    </div>
+    <p class="hint">Saved in this browser only — nothing is uploaded. Export before clearing site data or
+      switching browsers, or just keep a share link.</p>
   </div>
 
   <div class="pane" id="pIn">
@@ -317,8 +335,15 @@ body.dragging #drop{display:grid}
     </div>
     <h3>Pointer, touch &amp; controllers</h3>
     <p>Drag to push the flow field around (multi-touch works). Click or tap to detonate a burst.
-      Scroll or pinch to zoom. Connect a MIDI controller and the first eight CC knobs map to the Mix sliders.
-      On a phone, enable tilt to steer with the accelerometer.</p>
+      Scroll or pinch to zoom. The two knob sliders in the Code tab (<code>a0</code>, <code>a1</code>) are
+      usable by hand in any equation; connect a MIDI controller and CC 1–8 drive the same eight slots,
+      <code>a0</code>–<code>a7</code>. On a phone, enable tilt to steer with the accelerometer.</p>
+    <h3>Writing and saving your own equations</h3>
+    <p>The Code tab's five expressions recompile the shader as you type. <i>Save this equation…</i> names and
+      keeps a design in this browser — saving again under the same name overwrites it — listed under
+      <i>My presets</i> to reload with a click, or <i>Export all</i>/<i>Import</i> to move designs between
+      browsers as JSON. <i>Copy share link</i> packs one look into a URL instead. Nothing here is ever
+      uploaded.</p>
     <h3>Credit where it is due</h3>
     <p>Chromaflow is an independent, from-scratch homage to the visualizers made by
       <a href="https://www.soundspectrum.com/" target="_blank" rel="noopener noreferrer">SoundSpectrum</a> —
@@ -1407,7 +1432,11 @@ function applyPreset(ix, keepCode){
    Interaction state
    ========================================================================== */
 const ptr = { x:0, y:0, down:0, burst:0, vx:0, vy:0, active:false };
-const midiCC = new Float32Array(8);
+/* a0…a7 in the expression language. midiCC[0] and [1] double as the two Code-tab
+   knob sliders, so a hand-written equation has adjustable parameters even
+   without a MIDI controller plugged in; a connected controller simply overwrites
+   the same slots live. */
+const midiCC = new Float32Array(8); midiCC[0] = midiCC[1] = 0.5;
 const tilt = { on:false, x:0, y:0 };
 let adaptScale = 1, frameMs = 16, dpr = 1, cssW = 1, cssH = 1;
 
@@ -1819,11 +1848,85 @@ for(const [id, key] of SLIDERS){
   });
 }
 
+/* the two hand-turnable knobs (a0, a1) — MIDI CC 1/2 drive the same slots */
+['uK0','uK1'].forEach((id, i) => {
+  const el = $(id);
+  el.value = midiCC[i];
+  el.parentElement.querySelector('output').textContent = midiCC[i].toFixed(2);
+  el.addEventListener('input', () => {
+    midiCC[i] = parseFloat(el.value);
+    el.parentElement.querySelector('output').textContent = midiCC[i].toFixed(2);
+  });
+});
+
 /* tabs */
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === b.dataset.pane));
 });
+
+/* ---- state: the same shape backs the share link, local saves and the URL
+   loader, so a design can move between all three freely. ---- */
+function buildState(){
+  const state = { v:1, p:presetIx, e:{ fx:E.fx, fy:E.fy, wx:E.wx, wy:E.wy, wi:E.wi }, k:{} };
+  for(const k in P) if(P[k] !== DEFAULTS[k]) state.k[k] = P[k];
+  return state;
+}
+function applyState(st){
+  if(!st || st.v !== 1 || !st.e) return false;
+  presetIx = Math.max(0, Math.min(PRESETS.length-1, st.p|0));
+  Object.assign(P, DEFAULTS, PRESETS[presetIx].p || {}, { pal:PRESETS[presetIx].pal });
+  Object.assign(E, PRESETS[presetIx]);
+  ['fx','fy','wx','wy','wi'].forEach(k => { if(typeof st.e[k] === 'string') E[k] = st.e[k].slice(0, 800); });
+  for(const k in (st.k || {})) if(k in DEFAULTS && typeof st.k[k] === typeof DEFAULTS[k]) P[k] = st.k[k];
+  buildPalette(P.pal);
+  return rebuild();
+}
+
+/* ---- "My presets": named local saves, kept in this browser only ---- */
+const SAVE_KEY = 'chromaflow.saved.v1';
+function loadSaved(){
+  try{ const v = JSON.parse(localStorage.getItem(SAVE_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+function writeSaved(list){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); return true; }
+  catch(e){ toast('Could not save — browser storage is full or blocked'); return false; }
+}
+function saveCurrentAs(name){
+  name = (name || '').trim().slice(0, 60);
+  if(!name) return;
+  const list = loadSaved();
+  const entry = { name, savedAt: Date.now(), state: buildState() };
+  const ix = list.findIndex(s => s.name === name);
+  if(ix >= 0) list[ix] = entry; else list.push(entry);
+  if(writeSaved(list)){ renderSaved(); toast((ix >= 0 ? 'Updated “' : 'Saved “') + name + '”'); }
+}
+function deleteSaved(name){
+  if(writeSaved(loadSaved().filter(s => s.name !== name))) renderSaved();
+}
+function renderSaved(){
+  const wrap = $('savedList'), list = loadSaved().sort((a, b) => b.savedAt - a.savedAt);
+  $('savedCount').textContent = list.length ? (list.length + ' saved') : '';
+  wrap.innerHTML = '';
+  if(!list.length){
+    wrap.innerHTML = '<p class="hint">Nothing saved yet — write an equation above, then Save.</p>';
+    return;
+  }
+  for(const entry of list){
+    const row = document.createElement('div'); row.className = 'savedRow';
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = entry.name;
+    b.title = new Date(entry.savedAt).toLocaleString();
+    b.onclick = () => {
+      if(applyState(entry.state)){ syncUI(); toast('Loaded “' + entry.name + '”'); }
+      else toast('That saved equation no longer compiles');
+    };
+    const x = document.createElement('button'); x.className = 'icon'; x.textContent = '×'; x.title = 'Delete';
+    x.onclick = ev => { ev.stopPropagation(); deleteSaved(entry.name); };
+    row.append(b, x);
+    wrap.appendChild(row);
+  }
+}
 
 /* live expression editing */
 {
@@ -1835,30 +1938,48 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   bind('eFX','fx'); bind('eFY','fy'); bind('eWX','wx'); bind('eWY','wy'); bind('eWI','wi');
   $('bRevert').onclick = () => { applyPreset(presetIx); toast('Reverted to ' + PRESETS[presetIx].name); };
   $('bShare').onclick = async () => {
-    const state = { v:1, p:presetIx, e:E, k:{} };
-    for(const k in P) if(P[k] !== DEFAULTS[k]) state.k[k] = P[k];
-    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(state))))
+    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(buildState()))))
       .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
     const url = location.origin + location.pathname + '#' + enc;
     try{ await navigator.clipboard.writeText(url); toast('Share link copied'); }
     catch(e){ location.hash = enc; toast('Link is in the address bar'); }
     history.replaceState(null, '', '#' + enc);
   };
+  $('bSaveNew').onclick = () => {
+    const name = prompt('Save this equation as:', PRESETS[presetIx].name + ' (edit)');
+    if(name !== null) saveCurrentAs(name);
+  };
+  $('bExport').onclick = async () => {
+    const list = loadSaved();
+    if(!list.length) return toast('Nothing saved yet');
+    const json = JSON.stringify(list);
+    try{ await navigator.clipboard.writeText(json); toast('Copied ' + list.length + ' saved preset' + (list.length>1?'s':'') + ' as JSON'); }
+    catch(e){ prompt('Copy this text to back it up:', json); }
+  };
+  $('bImport').onclick = () => {
+    const text = prompt('Paste exported JSON to import:', '');
+    if(!text) return;
+    try{
+      const incoming = JSON.parse(text);
+      if(!Array.isArray(incoming)) throw new Error('not a list');
+      const list = loadSaved();
+      let added = 0, updated = 0;
+      for(const entry of incoming){
+        if(!entry || typeof entry.name !== 'string' || !entry.state) continue;
+        const ix = list.findIndex(s => s.name === entry.name);
+        if(ix >= 0){ list[ix] = entry; updated++; } else { list.push(entry); added++; }
+      }
+      if(writeSaved(list)){ renderSaved(); toast('Imported ' + added + ' new, updated ' + updated); }
+    }catch(e){ toast('That did not look like exported JSON'); }
+  };
+  renderSaved();
 }
 function loadHash(){
   const h = location.hash.slice(1);
   if(!h || h.length < 8) return false;
   try{
     const json = decodeURIComponent(escape(atob(h.replace(/-/g,'+').replace(/_/g,'/'))));
-    const st = JSON.parse(json);
-    if(!st || st.v !== 1) return false;
-    presetIx = Math.max(0, Math.min(PRESETS.length-1, st.p|0));
-    Object.assign(P, DEFAULTS, PRESETS[presetIx].p || {}, { pal:PRESETS[presetIx].pal });
-    Object.assign(E, PRESETS[presetIx]);
-    ['fx','fy','wx','wy','wi'].forEach(k => { if(typeof st.e[k] === 'string') E[k] = st.e[k].slice(0, 800); });
-    for(const k in (st.k || {})) if(k in DEFAULTS && typeof st.k[k] === typeof DEFAULTS[k]) P[k] = st.k[k];
-    buildPalette(P.pal);
-    return rebuild();
+    return applyState(JSON.parse(json));
   }catch(e){ return false; }
 }
 
