@@ -157,7 +157,7 @@ body.dragging #drop{display:grid}
   <button id="bPrev" class="icon" title="Previous preset (←)">‹</button>
   <select id="selPreset" title="Preset"></select>
   <button id="bNext" class="icon" title="Next preset (→ / Space)">›</button>
-  <button id="bAuto" title="Auto-VJ: switch presets on musical phrases (A)">Auto&#8209;VJ</button>
+  <button id="bAuto" title="Auto-VJ: fullscreen, hide the console, switch presets on musical phrases (A)">Auto&#8209;VJ</button>
   <div class="spacer"></div>
   <button id="bSrc" title="Audio source (M)">🎤 Source</button>
   <button id="bConsole" class="icon on" title="Toggle console (C)">☰</button>
@@ -305,7 +305,7 @@ body.dragging #drop{display:grid}
       <kbd>Space</kbd><span>next preset</span>
       <kbd>← →</kbd><span>previous / next preset</span>
       <kbd>1…8</kbd><span>jump to preset</span>
-      <kbd>A</kbd><span>Auto-VJ (switch on phrase changes)</span>
+      <kbd>A</kbd><span>Auto-VJ — fullscreen, console hidden, presets switch on phrase changes</span>
       <kbd>R</kbd><span>randomise a fresh look</span>
       <kbd>C</kbd><span>show / hide console</span>
       <kbd>H</kbd><span>cinema mode (hide all chrome)</span>
@@ -1440,7 +1440,7 @@ addEventListener('keydown', ev => {
   else if(k === 'ArrowRight'){ applyPreset(presetIx + 1); toast(PRESETS[presetIx].name); }
   else if(k === 'ArrowLeft'){ applyPreset(presetIx - 1); toast(PRESETS[presetIx].name); }
   else if(k >= '1' && k <= '8'){ applyPreset(+k - 1); toast(PRESETS[presetIx].name); }
-  else if(k === 'a' || k === 'A'){ autoVJ = !autoVJ; syncUI(); toast('Auto-VJ ' + (autoVJ ? 'on' : 'off')); }
+  else if(k === 'a' || k === 'A'){ setAutoVJ(!autoVJ); }
   else if(k === 'r' || k === 'R'){ randomise(); }
   else if(k === 'c' || k === 'C'){ document.body.classList.toggle('no-console'); syncUI(); }
   else if(k === 'h' || k === 'H'){ document.body.classList.toggle('cinema'); }
@@ -1450,10 +1450,33 @@ addEventListener('keydown', ev => {
   else if(k === '['){ P.pcount = Math.max(0, P.pcount - 1); syncUI(); toast(partCount() + ' particles'); }
   else if(k === ']'){ P.pcount = Math.min(7, P.pcount + 1); syncUI(); toast(partCount() + ' particles'); }
   else if(k === '?' || k === '/'){ const h = document.getElementById('help'); h.hidden = !h.hidden; }
-  else if(k === 'Escape'){ document.getElementById('help').hidden = true; document.body.classList.remove('cinema'); }
+  else if(k === 'Escape'){ document.getElementById('help').hidden = true; if(autoVJ) setAutoVJ(false); else document.body.classList.remove('cinema'); }
 });
 function partCount(){ const d = PART_DIMS[P.pcount|0]; const n = d*d;
   return n >= 1e6 ? (n/1e6).toFixed(1) + 'M' : Math.round(n/1000) + 'k'; }
+
+/* Auto-VJ is a "just play it" mode: turning it on goes fullscreen and hides
+   every bit of chrome, so the visualizer is the whole screen. Turning it off
+   (from any source — the button, the A key, or the viewer backing out of
+   fullscreen themselves) brings the console back. */
+function setAutoVJ(on){
+  autoVJ = on;
+  if(on){
+    document.body.classList.add('cinema');
+    if(!document.fullscreenElement && document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  } else {
+    document.body.classList.remove('cinema');
+    if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  syncUI();
+  toast('Auto-VJ ' + (on ? 'on — fullscreen' : 'off'));
+}
+addEventListener('fullscreenchange', () => {
+  if(!document.fullscreenElement && autoVJ) setAutoVJ(false);
+});
+
 function toggleFull(){
   if(document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(()=>{});
@@ -1842,7 +1865,7 @@ function loadHash(){
 /* buttons */
 $('bPrev').onclick = () => { applyPreset(presetIx - 1); toast(PRESETS[presetIx].name); };
 $('bNext').onclick = () => { applyPreset(presetIx + 1); toast(PRESETS[presetIx].name); };
-$('bAuto').onclick = () => { autoVJ = !autoVJ; syncUI(); toast('Auto-VJ ' + (autoVJ ? 'on' : 'off')); };
+$('bAuto').onclick = () => setAutoVJ(!autoVJ);
 $('bConsole').onclick = () => { document.body.classList.toggle('no-console'); syncUI(); };
 $('bHelp').onclick = () => { $('help').hidden = !$('help').hidden; };
 $('hClose').onclick = () => { $('help').hidden = true; };
