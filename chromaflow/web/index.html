@@ -1,0 +1,2166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chromaflow</title>
+<meta name="description" content="A GPU music visualizer in the tradition of SoundSpectrum's G-Force, WhiteCap and Aeon — flow fields, wave shapes and color maps, live-editable in the browser.">
+<style>
+/* Two faces, both doing a job: Archivo for chrome — a grotesque with enough
+   width variation to stay legible at 10px label sizes — and IBM Plex Mono for
+   the brand, the numbers and the expression editor, because the thing this page
+   descends from was a text file full of arithmetic.
+   This page commits to one visual world on purpose: a visualizer needs black
+   behind the canvas, so there is no light theme, and every colour below is
+   painted explicitly rather than inherited from the host. */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{
+  --bg:#07070b; --panel:rgba(14,14,20,.72); --panel-solid:#0e0e14;
+  --line:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.18);
+  --ink:#e9e9f2; --ink-dim:#9a9ab0; --ink-faint:#63637a;
+  --accent:#7cf5d5; --accent-2:#ff7ac6; --warn:#ffcf6b;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:Archivo,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--ui);
+  overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent;
+  text-rendering:optimizeLegibility;
+}
+canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;background:#000;z-index:0}
+
+/* ---------- chrome ---------- */
+.ui{position:fixed;z-index:10;transition:opacity .35s ease, transform .35s ease}
+body.cinema .ui{opacity:0;pointer-events:none;transform:translateY(4px)}
+body.cinema{cursor:none}
+
+#top{top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:10px 12px;
+  background:linear-gradient(180deg,rgba(4,4,8,.80),rgba(4,4,8,0));pointer-events:none}
+#top > *{pointer-events:auto}
+.brand{display:flex;align-items:baseline;gap:8px;user-select:none;padding-right:4px}
+.brand b{font:600 14px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase}
+.brand span{font:400 9.5px/1 var(--mono);letter-spacing:.14em;color:var(--ink-faint);text-transform:uppercase}
+.spacer{flex:1}
+
+button,select,input[type=text]{font:inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);padding:6px 11px;cursor:pointer;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:border-color .15s,background .15s,color .15s}
+button:hover,select:hover{border-color:var(--line-2);background:rgba(26,26,36,.82)}
+button:active{transform:translateY(1px)}
+button.on{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 1px rgba(124,245,213,.18) inset}
+button.rec{border-color:var(--accent-2);color:var(--accent-2)}
+button[disabled]{opacity:.4;cursor:not-allowed}
+.icon{width:34px;padding:6px 0;text-align:center;font-size:14px;line-height:1.25}
+:where(button,select,input,textarea,a):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pane:focus-visible{outline:none}
+kbd{font:11px/1 var(--mono);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;
+  padding:3px 5px;color:var(--ink-dim);background:rgba(255,255,255,.04)}
+
+/* ---------- left console ---------- */
+#console{top:56px;left:12px;width:322px;max-height:calc(100dvh - 128px);display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  backdrop-filter:blur(20px) saturate(1.3);-webkit-backdrop-filter:blur(20px) saturate(1.3);
+  box-shadow:0 24px 60px -20px rgba(0,0,0,.85);overflow:hidden}
+body.no-console #console{display:none}
+#tabs{display:flex;border-bottom:1px solid var(--line);flex:0 0 auto}
+#tabs button{flex:1;border:0;border-radius:0;background:none;backdrop-filter:none;color:var(--ink-faint);
+  font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;padding:11px 4px}
+#tabs button.on{color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+.pane{display:none;padding:12px 13px 15px;overflow-y:auto;scrollbar-width:thin;flex:1 1 auto}
+.pane.on{display:block}
+.pane::-webkit-scrollbar{width:8px}
+.pane::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px}
+
+.row{display:flex;align-items:center;gap:8px;margin:9px 0}
+.row label{flex:0 0 92px;font-size:11px;color:var(--ink-dim);letter-spacing:.03em}
+.row output{flex:0 0 46px;text-align:right;font:11px/1 var(--mono);color:var(--accent);opacity:.9}
+input[type=range]{flex:1;appearance:none;height:22px;background:none;cursor:ew-resize}
+input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:rgba(255,255,255,.16)}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:13px;height:13px;margin-top:-5px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 10px rgba(124,245,213,.55)}
+input[type=range]::-moz-range-track{height:3px;border-radius:3px;background:rgba(255,255,255,.16)}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radius:50%;background:var(--accent)}
+h4{margin:16px 0 6px;font:500 9.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+h4:first-child{margin-top:2px}
+.hint{font-size:11px;color:var(--ink-faint);margin:6px 0 0;line-height:1.5}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.chip{padding:7px 8px;font-size:11.5px;text-align:left;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip.on{border-color:var(--accent);color:var(--accent)}
+.savedRow{display:flex;gap:6px;margin:6px 0}
+.savedRow .chip{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.savedRow button.icon{width:28px;padding:6px 0;flex:0 0 auto}
+.sw{display:flex;gap:4px;flex-wrap:wrap}
+.sw button{width:30px;height:22px;padding:0;border-radius:6px;background-size:cover}
+
+textarea{width:100%;font:11.5px/1.55 var(--mono);color:var(--ink);background:rgba(0,0,0,.42);
+  border:1px solid var(--line);border-radius:8px;padding:8px 9px;resize:vertical;min-height:56px;
+  tab-size:2;white-space:pre;overflow-wrap:normal;overflow-x:auto}
+textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,245,213,.10)}
+textarea.err{border-color:#ff6b6b;box-shadow:0 0 0 3px rgba(255,107,107,.12)}
+.lbl{display:flex;justify-content:space-between;align-items:baseline;margin:12px 0 5px}
+.lbl b{font:10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+.lbl i{font-style:normal;font-size:10px;color:var(--ink-faint)}
+#exprErr{color:#ff8f8f;font:11px/1.45 var(--mono);margin-top:8px;min-height:16px;word-break:break-word}
+
+/* ---------- bottom bar ---------- */
+#bottom{left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:10px 12px 14px;
+  background:linear-gradient(0deg,rgba(4,4,8,.82),rgba(4,4,8,0));pointer-events:none;flex-wrap:wrap}
+#bottom > *{pointer-events:auto}
+#now{font:11px/1.35 var(--mono);color:var(--ink-dim);min-width:0;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#now b{color:var(--ink)}
+#meters{display:flex;align-items:flex-end;gap:2px;height:26px;width:112px}
+#meters i{flex:1;background:linear-gradient(0deg,var(--accent),var(--accent-2));border-radius:1px;height:2px;
+  transition:height .05s linear;opacity:.85}
+#stat{font:10.5px/1 var(--mono);color:var(--ink-faint);white-space:nowrap}
+#stat b{color:var(--accent);font-weight:500}
+
+/* ---------- overlays ---------- */
+.veil{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:24px;
+  background:rgba(4,4,9,.86);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.veil[hidden]{display:none}
+.card{width:min(560px,100%);max-height:86dvh;overflow-y:auto;background:var(--panel-solid);
+  border:1px solid var(--line);border-radius:16px;padding:26px 26px 22px;
+  box-shadow:0 40px 90px -30px #000}
+.card h2{margin:0 0 4px;font-size:21px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.card h3{margin:22px 0 8px;font:500 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+.card p{margin:8px 0;color:var(--ink-dim);font-size:12.5px;line-height:1.6}
+.card a{color:var(--accent)}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:12px;align-items:center}
+.keys span{color:var(--ink-dim)}
+.actions{display:flex;gap:8px;margin-top:22px;flex-wrap:wrap}
+.actions button{padding:9px 15px}
+.prime{background:var(--accent);color:#04120e;border-color:var(--accent);font-weight:600}
+.prime:hover{background:#9dffe6;border-color:#9dffe6}
+#drop{position:fixed;inset:0;z-index:60;display:none;place-items:center;
+  background:rgba(6,20,17,.80);border:3px dashed var(--accent);font-size:18px;letter-spacing:.05em}
+body.dragging #drop{display:grid}
+#toast{position:fixed;left:50%;bottom:76px;transform:translate(-50%,10px);z-index:50;
+  background:var(--panel-solid);border:1px solid var(--line-2);border-radius:999px;padding:8px 16px;
+  font-size:12px;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;white-space:nowrap}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:760px){
+  #console{left:8px;right:8px;width:auto;top:52px;max-height:52dvh}
+  .brand span{display:none}
+  #stat{display:none}
+  #top{padding:8px}
+}
+@media (prefers-reduced-motion:reduce){.ui{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="top" class="ui">
+  <div class="brand"><b>Chromaflow</b><span>flow&nbsp;·&nbsp;wave&nbsp;·&nbsp;color</span></div>
+  <button id="bPrev" class="icon" title="Previous preset (←)">‹</button>
+  <select id="selPreset" title="Preset"></select>
+  <button id="bNext" class="icon" title="Next preset (→ / Space)">›</button>
+  <button id="bAuto" title="Auto-VJ: fullscreen, hide the console, switch presets on musical phrases (A)">Auto&#8209;VJ</button>
+  <div class="spacer"></div>
+  <button id="bSrc" title="Audio source (M)">🎤 Source</button>
+  <button id="bConsole" class="icon on" title="Toggle console (C)">☰</button>
+  <button id="bHelp" class="icon" title="Help (?)">?</button>
+  <button id="bFull" class="icon" title="Fullscreen (F)">⛶</button>
+</div>
+
+<div id="console" class="ui">
+  <div id="tabs">
+    <button data-pane="pMix" class="on">Mix</button>
+    <button data-pane="pCode">Code</button>
+    <button data-pane="pIn">Input</button>
+  </div>
+
+  <div class="pane on" id="pMix">
+    <h4>Preset</h4>
+    <div class="grid2" id="presetChips"></div>
+
+    <h4>Motion</h4>
+    <div class="row"><label>Flow rate</label><input type="range" id="uFlow" min="0" max="3" step=".01"><output></output></div>
+    <div class="row"><label>Decay</label><input type="range" id="uDecay" min=".80" max="1" step=".001"><output></output></div>
+    <div class="row"><label>Spin</label><input type="range" id="uSpin" min="-2" max="2" step=".01"><output></output></div>
+    <div class="row"><label>Zoom</label><input type="range" id="uZoom" min="-.5" max=".5" step=".002"><output></output></div>
+
+    <h4>Wave shape</h4>
+    <div class="row"><label>Amplitude</label><input type="range" id="uWave" min="0" max="2.5" step=".01"><output></output></div>
+    <div class="row"><label>Steps</label><input type="range" id="uSteps" min="64" max="8192" step="64"><output></output></div>
+    <div class="row"><label>Line width</label><input type="range" id="uLW" min=".4" max="8" step=".1"><output></output></div>
+    <div class="row"><label>Ink</label><input type="range" id="uInkS" min="0" max="3" step=".01"><output></output></div>
+
+    <h4>Particles</h4>
+    <div class="row"><label>Count</label><input type="range" id="uPCount" min="0" max="7" step="1"><output></output></div>
+    <div class="row"><label>Drive</label><input type="range" id="uPForce" min="0" max="3" step=".01"><output></output></div>
+    <div class="row"><label>Size</label><input type="range" id="uPSize" min=".5" max="6" step=".1"><output></output></div>
+
+    <h4>Color &amp; light</h4>
+    <div class="sw" id="palSw"></div>
+    <div class="row"><label>Palette spin</label><input type="range" id="uPalSpin" min="-1" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Key colour</label><input type="range" id="uChroma" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Exposure</label><input type="range" id="uExp" min=".2" max="4" step=".01"><output></output></div>
+    <div class="row"><label>Bloom</label><input type="range" id="uBloom" min="0" max="2.5" step=".01"><output></output></div>
+    <div class="row"><label>Aberration</label><input type="range" id="uAberr" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Grain</label><input type="range" id="uGrain" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Vignette</label><input type="range" id="uVig" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Mirror</label><input type="range" id="uMirror" min="0" max="12" step="1"><output></output></div>
+
+    <h4>Reaction</h4>
+    <div class="row"><label>Sensitivity</label><input type="range" id="uGain" min=".2" max="5" step=".01"><output></output></div>
+    <div class="row"><label>Beat kick</label><input type="range" id="uKick" min="0" max="2" step=".01"><output></output></div>
+
+    <h4>Performance</h4>
+    <div class="row"><label>Resolution</label><input type="range" id="uRes" min=".4" max="2" step=".05"><output></output></div>
+    <div class="row"><label>Adaptive</label><input type="range" id="uAdapt" min="0" max="1" step="1"><output></output></div>
+  </div>
+
+  <div class="pane" id="pCode">
+    <p class="hint">Live config, in the spirit of G-Force <i>configs</i>. Edit an expression and it recompiles the
+      GPU shader as you type. Variables: <code>x y r th t s w mag bass mid treb beat level asp</code> ·
+      <code>phase bpm hue</code> (song structure) · <code>a0…a7</code> (the two knobs below, or a MIDI
+      controller) · <code>mx my mdown</code> (pointer position and click).</p>
+
+    <div class="row"><label>Knob 1 · a0</label><input type="range" id="uK0" min="0" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Knob 2 · a1</label><input type="range" id="uK1" min="0" max="1" step=".01"><output></output></div>
+
+    <div class="lbl"><b>Flow field · dx</b><i>source = f(dest)</i></div>
+    <textarea id="eFX" spellcheck="false"></textarea>
+    <div class="lbl"><b>Flow field · dy</b><i></i></div>
+    <textarea id="eFY" spellcheck="false"></textarea>
+
+    <div class="lbl"><b>Wave shape · x(s)</b><i>parametric</i></div>
+    <textarea id="eWX" spellcheck="false"></textarea>
+    <div class="lbl"><b>Wave shape · y(s)</b><i></i></div>
+    <textarea id="eWY" spellcheck="false"></textarea>
+
+    <div class="lbl"><b>Ink · intensity</b><i>per wave step</i></div>
+    <textarea id="eWI" spellcheck="false"></textarea>
+
+    <div id="exprErr"></div>
+    <div class="grid2" style="margin-top:10px">
+      <button id="bRevert" class="chip">Revert to preset</button>
+      <button id="bShare" class="chip">Copy share link</button>
+    </div>
+    <button id="bSaveNew" class="chip" style="width:100%;margin-top:6px;text-align:center">💾 Save this equation…</button>
+    <p class="hint">Functions: sin cos tan asin acos atan atan2 abs sqrt pow exp log min max clamp mix
+      floor ceil fract sign mod step smoothstep hypot wrap tri saw pulse noise rnd sq.</p>
+
+    <div class="lbl" style="margin-top:16px"><b>My presets</b><i id="savedCount"></i></div>
+    <div id="savedList"></div>
+    <div class="grid2" style="margin-top:6px">
+      <button id="bExport" class="chip">⬇ Export all</button>
+      <button id="bImport" class="chip">⬆ Import</button>
+    </div>
+    <p class="hint">Saved in this browser only — nothing is uploaded. Export before clearing site data or
+      switching browsers, or just keep a share link.</p>
+  </div>
+
+  <div class="pane" id="pIn">
+    <h4>Audio source</h4>
+    <div class="grid2">
+      <button id="bMic" class="chip">🎤 Microphone</button>
+      <button id="bTab" class="chip">🖥 Tab / system</button>
+      <button id="bFile" class="chip">🎵 Audio file</button>
+      <button id="bDemo" class="chip on">✨ Demo music</button>
+    </div>
+    <p class="hint" id="srcHint">Demo music is generated in the browser, so the visualizer always has something to
+      chew on. “Tab / system” shares another tab’s audio (Chrome/Edge desktop — tick <i>Share tab audio</i>).</p>
+    <audio id="player" style="width:100%;margin-top:10px;display:none" controls crossorigin="anonymous"></audio>
+
+    <h4>Analysis</h4>
+    <div class="row"><label>Smoothing</label><input type="range" id="uSmooth" min="0" max=".95" step=".01"><output></output></div>
+    <div class="row"><label>Attack</label><input type="range" id="uAttack" min=".05" max="1" step=".01"><output></output></div>
+    <div class="row"><label>Release</label><input type="range" id="uRelease" min=".01" max=".6" step=".005"><output></output></div>
+    <div class="row"><label>Beat thresh</label><input type="range" id="uBeatT" min=".05" max="3" step=".01"><output></output></div>
+
+    <h4>Controllers</h4>
+    <div class="grid2">
+      <button id="bMidi" class="chip">🎛 Enable MIDI</button>
+      <button id="bTilt" class="chip">📱 Enable tilt</button>
+    </div>
+    <p class="hint" id="ctlHint">Pointer drags push the flow field; a click detonates. Gamepad sticks steer
+      spin&nbsp;/&nbsp;zoom automatically when one is connected.</p>
+
+    <h4>Sync out (OSC)</h4>
+    <input type="text" id="oscUrl" value="ws://127.0.0.1:8081" style="width:100%;margin-bottom:6px">
+    <button id="bOsc" class="chip" style="width:100%">🔌 Connect OSC bridge</button>
+    <p class="hint">Sends <code>bass mid treb level mag beat bpm hue phase preset</code> out live, to sync an
+      openFrameworks sketch, TouchDesigner, Max/MSP or Pure Data to the same music. Browsers can't open raw
+      UDP sockets, so run the small bridge that ships beside this file first:
+      <code>node osc-bridge.js</code> — by default it forwards to <code>udp://127.0.0.1:9000</code>
+      (override with <code>--osc-host</code> / <code>--osc-port</code>).</p>
+  </div>
+</div>
+
+<div id="bottom" class="ui">
+  <div id="meters" title="Spectrum"></div>
+  <div id="now"></div>
+  <div id="stat"></div>
+</div>
+
+<div id="drop">Drop an audio file to play it</div>
+<div id="toast"></div>
+
+<div class="veil" id="intro">
+  <div class="card">
+    <h2>Chromaflow</h2>
+    <p>A music visualizer built on three old, good ideas — a <b>flow field</b> that drags the whole
+      picture somewhere new each frame, a <b>wave shape</b> that draws the sound as a parametric curve, and a
+      <b>color map</b> that turns raw intensity into light — rebuilt on the GPU with a million particles,
+      live-editable expressions, and modern beat, tempo and key detection.</p>
+    <p>Those three ideas come from SoundSpectrum’s <b>G-Force</b>, <b>WhiteCap</b> and <b>Aeon</b>, whose
+      config scripting and PythonCanvas API this is an homage to. Full credit below.</p>
+    <h3>Pick a sound</h3>
+    <div class="actions">
+      <button class="prime" id="iDemo">✨ Demo music</button>
+      <button id="iMic">🎤 Microphone</button>
+      <button id="iTab">🖥 Tab audio</button>
+      <button id="iFile">🎵 Open file…</button>
+    </div>
+    <p class="hint" style="margin-top:16px">Nothing is uploaded — all audio stays in your browser.
+      Press <kbd>?</kbd> any time for keys and credits.</p>
+  </div>
+</div>
+
+<div class="veil" id="help" hidden>
+  <div class="card">
+    <h2>Keys &amp; credits</h2>
+    <h3>Keyboard</h3>
+    <div class="keys">
+      <kbd>Space</kbd><span>next preset</span>
+      <kbd>← →</kbd><span>previous / next preset</span>
+      <kbd>1…8</kbd><span>jump to preset</span>
+      <kbd>A</kbd><span>Auto-VJ — fullscreen, console hidden, presets switch on phrase changes</span>
+      <kbd>R</kbd><span>randomise a fresh look</span>
+      <kbd>C</kbd><span>show / hide console</span>
+      <kbd>H</kbd><span>cinema mode (hide all chrome)</span>
+      <kbd>F</kbd><span>fullscreen</span>
+      <kbd>M</kbd><span>cycle audio source</span>
+      <kbd>[ ]</kbd><span>fewer / more particles</span>
+      <kbd>P</kbd><span>pause / resume motion</span>
+      <kbd>?</kbd><span>this panel</span>
+    </div>
+    <h3>Pointer, touch &amp; controllers</h3>
+    <p>Drag to push the flow field around (multi-touch works). Click or tap to detonate a burst.
+      Scroll or pinch to zoom. The two knob sliders in the Code tab (<code>a0</code>, <code>a1</code>) are
+      usable by hand in any equation; connect a MIDI controller and CC 1–8 drive the same eight slots,
+      <code>a0</code>–<code>a7</code>. On a phone, enable tilt to steer with the accelerometer.</p>
+    <h3>Writing and saving your own equations</h3>
+    <p>The Code tab's five expressions recompile the shader as you type. <i>Save this equation…</i> names and
+      keeps a design in this browser — saving again under the same name overwrites it — listed under
+      <i>My presets</i> to reload with a click, or <i>Export all</i>/<i>Import</i> to move designs between
+      browsers as JSON. <i>Copy share link</i> packs one look into a URL instead. Nothing here is ever
+      uploaded.</p>
+    <h3>Syncing other software (OSC)</h3>
+    <p>Input tab → <i>Sync out (OSC)</i> sends bass/mid/treb/level/mag/beat/bpm/hue/phase/preset out live,
+      so an openFrameworks sketch, TouchDesigner, Max/MSP or Pure Data patch can react to the same music.
+      Browsers can't open raw UDP, so run the small bridge that ships beside this file first —
+      <code>node osc-bridge.js</code> — then connect to its <code>ws://</code> address here.</p>
+    <h3>Credit where it is due</h3>
+    <p>Chromaflow is an independent, from-scratch homage to the visualizers made by
+      <a href="https://www.soundspectrum.com/" target="_blank" rel="noopener noreferrer">SoundSpectrum</a> —
+      <b>G-Force</b>, <b>WhiteCap</b>, <b>SoftSkies</b> and <b>Aeon</b>, the art of Drew O'Meara and still actively
+      developed — and to two pieces of their documentation in particular: the
+      <a href="https://www.soundspectrum.com/g-force/Documentation/config-programming.html" target="_blank" rel="noopener noreferrer">G-Force config programming</a>
+      guide (WaveShapes, FlowFields, ColorMaps — and the exact five-step per-frame loop this engine follows) and the
+      <a href="https://www.soundspectrum.com/aeon/Documentation/PythonCanvas.html" target="_blank" rel="noopener noreferrer">Aeon PythonCanvas</a>
+      drawing API (its <code>SetDrawClass</code> / <code>Draw(self, fft, time)</code> scene contract, kept on
+      purpose in the Python build's <code>chromaflow/scene.py</code>). No SoundSpectrum code, art, presets or
+      config syntax are used here; the debt is one of architecture and ideas, not of text — see
+      <code>CREDITS.md</code> in the repository for the full account, and consider trying the real thing.</p>
+    <p>Everything else is new work, released into the public domain — see the repository for the
+      Python engine that carries the same ideas to the desktop.</p>
+    <div class="actions"><button class="prime" id="hClose">Back to the music</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Chromaflow — a GPU music visualizer.
+   An independent homage to SoundSpectrum's G-Force / WhiteCap / Aeon:
+   a FlowField that advects the frame, a WaveShape drawn as a parametric curve,
+   and a ColorMap that turns accumulated ink into light.
+   Public domain (Unlicense). No SoundSpectrum code or assets are used.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- shaders */
+const GLSL_HEAD = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+`;
+
+/* Shared helpers: hashes, simplex noise, curl, and the audio accessors that
+   every compiled user expression is allowed to reach for. */
+const GLSL_LIB = `
+float hash11(float p){ p=fract(p*0.1031); p*=p+33.33; p*=p+p; return fract(p); }
+float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+vec2  hash22(vec2 p){ vec3 p3=fract(vec3(p.xyx)*vec3(0.1031,0.1030,0.0973));
+                      p3+=dot(p3,p3.yzx+33.33); return fract((p3.xx+p3.yz)*p3.zy); }
+
+float snoise(vec2 v){
+  const vec4 C=vec4(0.211324865,0.366025404,-0.577350269,0.024390244);
+  vec2 i=floor(v+dot(v,C.yy)), x0=v-i+dot(i,C.xx);
+  vec2 i1=(x0.x>x0.y)?vec2(1.0,0.0):vec2(0.0,1.0);
+  vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1;
+  i=mod(i,289.0);
+  vec3 pp=mod(((i.y+vec3(0.0,i1.y,1.0))*34.0+1.0)*(i.y+vec3(0.0,i1.y,1.0)),289.0);
+  pp=mod(((pp+i.x+vec3(0.0,i1.x,1.0))*34.0+1.0)*(pp+i.x+vec3(0.0,i1.x,1.0)),289.0);
+  vec3 m=max(0.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.0); m=m*m; m=m*m;
+  vec3 x=2.0*fract(pp*C.www)-1.0, h=abs(x)-0.5, ox=floor(x+0.5), a0=x-ox;
+  m*=1.79284291-0.85373473*(a0*a0+h*h);
+  vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw;
+  return 130.0*dot(m,g);
+}
+float fbm(vec2 p){ float f=0.0,a=0.5; for(int i=0;i<4;i++){ f+=a*snoise(p); p*=2.03; a*=0.5; } return f; }
+vec2 curl(vec2 p,float e){
+  float n1=fbm(p+vec2(0.0,e)), n2=fbm(p-vec2(0.0,e));
+  float n3=fbm(p+vec2(e,0.0)), n4=fbm(p-vec2(e,0.0));
+  return vec2(n1-n2,n4-n3)/(2.0*e);
+}
+
+/* helpers exposed to user expressions */
+float wrapf(float v,float lo,float hi){ float d=hi-lo; return lo+mod(mod(v-lo,d)+d,d); }
+float trif(float v){ return abs(fract(v)*2.0-1.0)*2.0-1.0; }
+float sawf(float v){ return fract(v)*2.0-1.0; }
+float pulsef(float v,float duty){ return fract(v)<duty?1.0:-1.0; }
+float sqf(float v){ return v*v; }
+float hypotf(float a,float b){ return sqrt(a*a+b*b); }
+float rndf(float seed){ return hash11(seed*17.13+0.7)*2.0-1.0; }
+float noisef(float a,float b){ return snoise(vec2(a,b)); }
+float safelog(float v){ return log(max(abs(v),1e-6)); }
+float safepow(float a,float b){ return pow(abs(a),b) * (a<0.0 ? -1.0 : 1.0); }
+float safesqrt(float v){ return sqrt(max(v,0.0)); }
+`;
+
+/* Uniform block shared by every pass that can host a user expression. */
+const GLSL_UNIFORMS = `
+uniform vec2  uRes;
+uniform float uAsp, uTime, uDt;
+uniform float uMag, uBass, uMid, uTreb, uLevel, uBeat, uBeatPhase, uHue, uBPM;
+uniform float uA0,uA1,uA2,uA3,uA4,uA5,uA6,uA7;
+uniform vec4  uPtr;            /* xy = pointer in field space, z = down, w = age */
+uniform sampler2D uSpec, uWave;
+float specAt(float f){ return texture(uSpec, vec2(clamp(f,0.0,1.0),0.5)).r; }
+float waveAt(float f){ return texture(uWave, vec2(clamp(f,0.0,1.0),0.5)).r; }
+`;
+
+/* Fullscreen triangle — no vertex buffer required. */
+const VS_QUAD = GLSL_HEAD + `
+out vec2 vUv;
+void main(){
+  vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2);
+  vUv = p; gl_Position = vec4(p*2.0-1.0,0.0,1.0);
+}`;
+
+/* ---- pass 1: semi-Lagrangian advection of the whole plane (the FlowField) */
+function fsWarp(exprX, exprY){ return GLSL_HEAD + GLSL_LIB + GLSL_UNIFORMS + `
+in vec2 vUv;
+uniform sampler2D uPlane;
+uniform float uDecay, uFlow, uSpin, uZoom, uPtrForce;
+out vec4 oCol;
+void main(){
+  vec2 p = (vUv*2.0-1.0); p.x *= uAsp;
+  float x=p.x, y=p.y, r=length(p), th=atan(p.y,p.x), t=uTime;
+  float mag=uMag, bass=uBass, mid=uMid, treb=uTreb, level=uLevel, beat=uBeat, asp=uAsp;
+  float s=0.0, w=waveAt(clamp(r,0.0,1.0));
+  float dx = ${exprX};
+  float dy = ${exprY};
+  vec2 vel = vec2(dx,dy);
+  /* pointer drag pushes the field along its own velocity */
+  vec2 d = p - uPtr.xy; float pd = length(d);
+  vel += uPtr.z * uPtrForce * normalize(d + 1e-6) * exp(-pd*pd*7.0) * 2.0;
+  vec2 src = p - vel * uFlow * uDt;
+  float c = cos(uSpin*uDt), sn = sin(uSpin*uDt);
+  src = mat2(c,-sn,sn,c) * src * (1.0 - uZoom*uDt);
+  vec2 suv = vec2(src.x/uAsp, src.y)*0.5 + 0.5;
+  vec4 prev = texture(uPlane, clamp(suv, 0.0015, 0.9985));
+  vec2 e = smoothstep(vec2(0.0), vec2(0.02), suv) * (1.0-smoothstep(vec2(0.98), vec2(1.0), suv));
+  prev *= min(e.x,e.y);
+  /* Conserve ink across the warp.  Where the field spreads the picture out, the
+     same ink now covers more pixels, so the gathered value has to come down by
+     the Jacobian of the map — otherwise an outward flow multiplies brightness
+     every frame and any zoom-out preset saturates to white.  Screen-space
+     derivatives give the divergence for free. */
+  vec2 texel = vec2(2.0*uAsp/uRes.x, 2.0/uRes.y);
+  float divg = dFdx(vel.x)/texel.x + dFdy(vel.y)/texel.y;
+  float jac = clamp(1.0 - divg*(uFlow*uDt) - (uZoom*uDt)*2.0, 0.0, 2.0);
+  oCol = prev * jac * pow(uDecay, uDt*60.0);
+}`; }
+
+/* ---- pass 2: the WaveShape, expanded to a ribbon in the vertex shader ---- */
+function vsWave(exprX, exprY, exprI){ return GLSL_HEAD + GLSL_LIB + GLSL_UNIFORMS + `
+uniform float uSteps, uAmp, uLW;
+out float vSide;
+out float vInk;
+out vec3  vTint;
+vec2 shape(float s, float w){
+  float x0, y0, t=uTime, r=s, th=s*6.28318530718;
+  float mag=uMag, bass=uBass, mid=uMid, treb=uTreb, level=uLevel, beat=uBeat, asp=uAsp;
+  float x=cos(th), y=sin(th);
+  x0 = ${exprX};
+  y0 = ${exprY};
+  return vec2(x0,y0);
+}
+void main(){
+  int vid = gl_VertexID;
+  int seg = vid >> 1;
+  float side = float(vid & 1)*2.0 - 1.0;
+  float n = max(uSteps-1.0, 1.0);
+  float s  = float(seg)/n;
+  float ds = 1.0/n;
+  float w  = waveAt(s) * uAmp;
+  float w2 = waveAt(min(s+ds,1.0)) * uAmp;
+  vec2 a = shape(s, w);
+  vec2 b = shape(min(s+ds,1.0), w2);
+  vec2 tg = b - a;
+  float L = length(tg);
+  vec2 nrm = L > 1e-7 ? vec2(-tg.y, tg.x)/L : vec2(0.0,1.0);
+  float lw = uLW / uRes.y * 2.0 * (1.0 + uBeat*0.6);
+  vec2 pos = a + nrm*side*lw;
+  vSide = side;
+  {
+    float t=uTime, x=a.x, y=a.y, r=length(a), th=atan(a.y,a.x);
+    float mag=uMag, bass=uBass, mid=uMid, treb=uTreb, level=uLevel, beat=uBeat, asp=uAsp;
+    vInk = ${exprI};
+  }
+  vTint = vec3(0.0);
+  gl_Position = vec4(pos.x/uAsp, pos.y, 0.0, 1.0);
+}`; }
+
+const FS_WAVE = GLSL_HEAD + `
+in float vSide; in float vInk; in vec3 vTint;
+uniform float uInk;
+out vec4 oCol;
+void main(){
+  float a = 1.0 - abs(vSide);
+  a = smoothstep(0.0, 0.85, a);
+  float ink = max(vInk, 0.0) * a * uInk;
+  oCol = vec4(vTint*ink, ink);
+}`;
+
+/* ---- pass 3: particle integration (MRT: state + aux) -------------------- */
+function fsParticles(exprX, exprY){ return GLSL_HEAD + GLSL_LIB + GLSL_UNIFORMS + `
+in vec2 vUv;
+uniform sampler2D uState, uAux;
+uniform float uPForce, uCurl, uFlow, uSpin, uPtrForce, uDrag, uSpawn;
+layout(location=0) out vec4 oState;
+layout(location=1) out vec4 oAux;
+void main(){
+  ivec2 ij = ivec2(gl_FragCoord.xy);
+  vec4 st = texelFetch(uState, ij, 0);
+  vec4 ax = texelFetch(uAux,   ij, 0);
+  vec2 p = st.xy, v = st.zw;
+  float id = float(ij.x + ij.y*4096);
+
+  if(ax.y <= 0.0){                        /* uninitialised */
+    ax.y = 1.0; ax.x = hash11(id)*4.0;
+  }
+
+  float x=p.x, y=p.y, r=length(p), th=atan(p.y,p.x), t=uTime, s=ax.x, w=waveAt(fract(ax.z));
+  float mag=uMag, bass=uBass, mid=uMid, treb=uTreb, level=uLevel, beat=uBeat, asp=uAsp;
+  vec2 field = vec2(${exprX}, ${exprY});
+
+  vec2 acc = field * uFlow * 0.8;
+  acc += curl(p*1.6 + vec2(uTime*0.09, -uTime*0.06), 0.08) * uCurl * (0.35 + uMid*2.2);
+  acc += vec2(-p.y, p.x) * uSpin * 0.4;
+  acc -= p * (0.30 + uBass*0.6) * smoothstep(0.75, 1.6, r);    /* soft outer wall */
+  vec2 d = p - uPtr.xy; float pd = length(d) + 1e-5;
+  acc += (d/pd) * uPtr.z * uPtrForce * exp(-pd*pd*5.0) * 5.0;
+  acc *= uPForce;
+
+  v += acc * uDt;
+  v *= pow(uDrag, uDt*60.0);
+  float vm = length(v); if(vm > 6.0) v *= 6.0/vm;
+  p += v * uDt;
+
+  ax.x -= uDt * (0.13 + 0.5*hash11(id*3.7));
+  bool dead = ax.x <= 0.0 || abs(p.x) > uAsp*1.6 || abs(p.y) > 1.6;
+  if(dead){
+    vec2 h = hash22(vec2(id, floor(uTime*37.0)));
+    float ang = h.x*6.28318530718;
+    float rad = uSpawn*(0.05 + 1.15*pow(h.y,0.6)) * (0.55 + uBeat*0.8);
+    p = vec2(cos(ang),sin(ang))*rad;
+    v = vec2(-sin(ang),cos(ang))*0.25*(0.4+uLevel*2.0);
+    ax.x = 0.7 + 2.6*hash11(id*1.31 + uTime);
+    ax.z = fract(uHue + h.x*0.22 + uBass*0.12);
+    ax.w = 0.35 + 0.9*hash11(id*7.7);
+  }
+  oState = vec4(p, v);
+  oAux   = ax;
+}`; }
+
+const VS_PDRAW = GLSL_HEAD + `
+uniform sampler2D uState, uAux;
+uniform float uAsp, uPSize, uTexDim, uBeat, uLevel;
+out vec3  vCol;
+out float vFade;
+vec3 hsl(float h,float s,float l){
+  vec3 k = mod(vec3(0.0,8.0,4.0) + h*12.0, 12.0);
+  float a = s*min(l,1.0-l);
+  return l - a*clamp(min(k-3.0, 9.0-k), -1.0, 1.0);
+}
+void main(){
+  int id = gl_VertexID;
+  int dim = int(uTexDim);
+  ivec2 ij = ivec2(id % dim, id / dim);
+  vec4 st = texelFetch(uState, ij, 0);
+  vec4 ax = texelFetch(uAux,   ij, 0);
+  float life = clamp(ax.x*0.55, 0.0, 1.0);
+  vFade = smoothstep(0.0,0.25,life) * smoothstep(1.0,0.75,life*0.65);
+  vCol = pow(hsl(fract(ax.z), 0.85, 0.55 + 0.2*uBeat), vec3(2.2));
+  gl_PointSize = max(1.0, uPSize * ax.w * (1.0 + uBeat*0.8));
+  gl_Position = vec4(st.x/uAsp, st.y, 0.0, 1.0);
+}`;
+
+const FS_PDRAW = GLSL_HEAD + `
+in vec3 vCol; in float vFade;
+uniform float uInk;
+out vec4 oCol;
+void main(){
+  vec2 d = gl_PointCoord*2.0 - 1.0;
+  float q = dot(d,d);
+  if(q > 1.0) discard;
+  float a = pow(1.0-q, 2.2) * vFade * uInk;
+  oCol = vec4(vCol*a, a*0.6);
+}`;
+
+/* ---- pass 4: the ColorMap — accumulated ink becomes light --------------- */
+/* The ColorMap pass.  Accumulated ink indexes a 256-entry palette exactly as a
+   G-Force ColorMap did; palette rotation is a hue spin about the grey axis, so
+   entry 0 stays black and the ramp stays monotonic in intensity. */
+const FS_COLORIZE = GLSL_HEAD + `
+in vec2 vUv;
+uniform sampler2D uPlane, uPal;
+uniform float uPalShift, uPalScale, uExposure, uColorMix;
+out vec4 oCol;
+vec3 hueRot(vec3 c, float a){
+  const vec3 k = vec3(0.57735026919);
+  float t = a*6.28318530718, ca = cos(t);
+  return c*ca + cross(k,c)*sin(t) + k*dot(k,c)*(1.0-ca);
+}
+void main(){
+  vec4 pl = texture(uPlane, vUv);
+  float idx = clamp(pl.a * uPalScale, 0.0, 1.0);
+  vec3 col = hueRot(pow(texture(uPal, vec2(idx, 0.5)).rgb, vec3(2.2)), uPalShift);
+  col += pl.rgb * uColorMix;
+  oCol = vec4(max(col, 0.0) * uExposure, 1.0);
+}`;
+
+const FS_DOWN = GLSL_HEAD + `
+in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel; uniform float uThresh;
+out vec4 oCol;
+void main(){
+  vec3 s = texture(uSrc,vUv+uTexel*vec2(-1.0,-1.0)).rgb + texture(uSrc,vUv+uTexel*vec2(1.0,-1.0)).rgb
+         + texture(uSrc,vUv+uTexel*vec2(-1.0, 1.0)).rgb + texture(uSrc,vUv+uTexel*vec2(1.0, 1.0)).rgb;
+  s *= 0.25;
+  float l = dot(s, vec3(0.2126,0.7152,0.0722));
+  s *= smoothstep(uThresh, uThresh + 0.6, l) * 0.85 + 0.15;
+  oCol = vec4(s,1.0);
+}`;
+
+/* The upsample is additive-blended onto its destination rather than sampling
+   it, which would be a framebuffer feedback loop. */
+const FS_UP = GLSL_HEAD + `
+in vec2 vUv; uniform sampler2D uSrc; uniform vec2 uTexel;
+out vec4 oCol;
+void main(){
+  vec3 s = texture(uSrc,vUv+uTexel*vec2(-1.0,0.0)).rgb + texture(uSrc,vUv+uTexel*vec2(1.0,0.0)).rgb
+         + texture(uSrc,vUv+uTexel*vec2(0.0,-1.0)).rgb + texture(uSrc,vUv+uTexel*vec2(0.0,1.0)).rgb
+         + texture(uSrc,vUv).rgb*2.0;
+  oCol = vec4(s/6.0, 1.0);
+}`;
+
+/* ---- pass 5: composite — mirror, bloom, tonemap, aberration, grain ------ */
+const FS_POST = GLSL_HEAD + GLSL_LIB + `
+in vec2 vUv;
+uniform sampler2D uLit, uBloom;
+uniform vec2 uRes;
+uniform float uAsp, uTime, uBloomAmt, uAberr, uGrain, uVig, uMirror, uBeat, uExposure2;
+vec3 aces(vec3 x){
+  const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+out vec4 oCol;
+vec2 mirrorUv(vec2 uv){
+  if(uMirror < 0.5) return uv;
+  vec2 p = (uv*2.0-1.0); p.x *= uAsp;
+  float a = atan(p.y,p.x), r = length(p);
+  float seg = 6.28318530718 / uMirror;
+  a = abs(mod(a + uTime*0.03, seg) - seg*0.5);
+  p = vec2(cos(a), sin(a))*r;
+  return vec2(p.x/uAsp, p.y)*0.5 + 0.5;
+}
+void main(){
+  vec2 uv = mirrorUv(vUv);
+  vec2 c = uv - 0.5;
+  float k = uAberr * (0.004 + uBeat*0.010);
+  vec3 col;
+  col.r = texture(uLit, uv + c*k).r;
+  col.g = texture(uLit, uv).g;
+  col.b = texture(uLit, uv - c*k).b;
+  col += texture(uBloom, uv).rgb * uBloomAmt;
+  col *= uExposure2;
+  col = aces(col);
+  float d = length(c*vec2(uAsp,1.0));
+  col *= mix(1.0, smoothstep(1.25, 0.25, d), uVig);
+  col = pow(max(col,0.0), vec3(0.4545));
+  col += (hash12(gl_FragCoord.xy + fract(uTime)*713.0) - 0.5) * uGrain * 0.05;
+  oCol = vec4(max(col,0.0), 1.0);
+}`;
+
+/* ============================================================================
+   Expression compiler.  A tiny, total, float-only language that compiles to
+   GLSL — the descendant of G-Force's plain-text configs.  Nothing reaches the
+   shader that is not on these two whitelists, so a shared link can never smuggle
+   arbitrary GLSL into your driver.
+   ========================================================================== */
+const EXPR_VARS = {
+  x:'x', y:'y', r:'r', th:'th', theta:'th', s:'s', w:'w', t:'t', time:'t', dt:'uDt',
+  mag:'mag', bass:'bass', mid:'mid', treb:'treb', level:'level', beat:'beat',
+  phase:'uBeatPhase', bpm:'uBPM', hue:'uHue', asp:'asp', aspect:'asp',
+  pi:'3.14159265359', tau:'6.28318530718', e:'2.71828182846',
+  a0:'uA0', a1:'uA1', a2:'uA2', a3:'uA3', a4:'uA4', a5:'uA5', a6:'uA6', a7:'uA7',
+  mx:'uPtr.x', my:'uPtr.y', mdown:'uPtr.z'
+};
+const EXPR_FNS = {
+  sin:['sin',1], cos:['cos',1], tan:['tan',1], asin:['asin',1], acos:['acos',1],
+  atan:['atan',1], atan2:['atan',2], sinh:['sinh',1], cosh:['cosh',1], tanh:['tanh',1],
+  abs:['abs',1], floor:['floor',1], ceil:['ceil',1], fract:['fract',1], sign:['sign',1],
+  exp:['exp',1], log:['safelog',1], sqrt:['safesqrt',1], pow:['safepow',2],
+  min:['min',2], max:['max',2], mod:['mod',2], step:['step',2],
+  clamp:['clamp',3], mix:['mix',3], smoothstep:['smoothstep',3],
+  hypot:['hypotf',2], wrap:['wrapf',3], tri:['trif',1], saw:['sawf',1],
+  pulse:['pulsef',2], sq:['sqf',1], rnd:['rndf',1], noise:['noisef',2],
+  spec:['specAt',1], wave:['waveAt',1]
+};
+
+function tokenize(src){
+  const out = []; let i = 0;
+  const isD = c => c >= '0' && c <= '9';
+  const isA = c => /[A-Za-z_]/.test(c);
+  while(i < src.length){
+    const c = src[i];
+    if(/\s/.test(c)){ i++; continue; }
+    if(c === '#'){ while(i < src.length && src[i] !== '\n') i++; continue; }
+    if(isD(c) || (c === '.' && isD(src[i+1]))){
+      let j = i;
+      while(j < src.length && (isD(src[j]) || src[j] === '.')) j++;
+      if(src[j] === 'e' || src[j] === 'E'){
+        let k = j+1; if(src[k] === '+' || src[k] === '-') k++;
+        if(isD(src[k])){ j = k; while(j < src.length && isD(src[j])) j++; }
+      }
+      out.push({k:'num', v:src.slice(i,j)}); i = j; continue;
+    }
+    if(isA(c)){
+      let j = i; while(j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+      out.push({k:'id', v:src.slice(i,j).toLowerCase()}); i = j; continue;
+    }
+    const two = src.substr(i,2);
+    if(['<=','>=','==','!=','&&','||'].includes(two)){ out.push({k:'op', v:two}); i += 2; continue; }
+    if('+-*/%^(),<>?:'.includes(c)){ out.push({k:'op', v:c}); i++; continue; }
+    throw new Error('unexpected character "' + c + '"');
+  }
+  out.push({k:'end', v:''});
+  return out;
+}
+
+function compileExpr(src){
+  const tk = tokenize(src || '');
+  if(tk[0].k === 'end') return '0.0';   /* blank, or nothing but comments */
+  let pos = 0;
+  const peek = () => tk[pos];
+  const eat = v => { if(tk[pos].v === v){ pos++; return true; } return false; };
+  const need = v => { if(!eat(v)) throw new Error('expected "' + v + '" near "' + (tk[pos].v||'end') + '"'); };
+
+  function primary(){
+    const tok = peek();
+    if(tok.k === 'num'){ pos++; return '(' + (/[.eE]/.test(tok.v) ? tok.v : tok.v + '.0') + ')'; }
+    if(tok.k === 'op' && (tok.v === '-' || tok.v === '+')){ pos++; const v = primary(); return '(' + tok.v + v + ')'; }
+    if(tok.k === 'op' && tok.v === '('){ pos++; const v = ternary(); need(')'); return '(' + v + ')'; }
+    if(tok.k === 'id'){
+      pos++;
+      const name = tok.v;
+      if(peek().v === '(' && peek().k === 'op'){
+        const fn = EXPR_FNS[name];
+        if(!fn) throw new Error('unknown function "' + name + '"');
+        pos++;
+        const args = [];
+        if(!eat(')')){
+          do { args.push(ternary()); } while(eat(','));
+          need(')');
+        }
+        if(args.length !== fn[1]) throw new Error(name + '() takes ' + fn[1] + ' argument' + (fn[1]>1?'s':''));
+        return fn[0] + '(' + args.join(',') + ')';
+      }
+      const v = EXPR_VARS[name];
+      if(v === undefined) throw new Error('unknown name "' + name + '"');
+      return '(' + v + ')';
+    }
+    throw new Error('unexpected "' + (tok.v || 'end of expression') + '"');
+  }
+  function power(){ const a = primary(); if(eat('^')) return 'safepow(' + a + ',' + power() + ')'; return a; }
+  function unary(){ if(eat('-')) return '(-' + unary() + ')'; if(eat('+')) return unary(); return power(); }
+  function mul(){ let a = unary();
+    for(;;){ if(eat('*')) a = '(' + a + '*' + unary() + ')';
+      else if(eat('/')) a = '(' + a + '/' + unary() + ')';
+      else if(eat('%')) a = 'mod(' + a + ',' + unary() + ')';
+      else return a; } }
+  function add(){ let a = mul();
+    for(;;){ if(eat('+')) a = '(' + a + '+' + mul() + ')';
+      else if(eat('-')) a = '(' + a + '-' + mul() + ')';
+      else return a; } }
+  function cmp(){ let a = add();
+    for(;;){ const v = peek().v;
+      if(['<','>','<=','>=','==','!='].includes(v) && peek().k === 'op'){
+        pos++; a = '((' + a + v + add() + ')?1.0:0.0)';
+      } else return a; } }
+  function andE(){ let a = cmp(); while(eat('&&')) a = '((' + a + '>0.5&&' + cmp() + '>0.5)?1.0:0.0)'; return a; }
+  function orE(){ let a = andE(); while(eat('||')) a = '((' + a + '>0.5||' + andE() + '>0.5)?1.0:0.0)'; return a; }
+  function ternary(){
+    const c = orE();
+    if(eat('?')){ const a = ternary(); need(':'); const b = ternary(); return '((' + c + '>0.5)?' + a + ':' + b + ')'; }
+    return c;
+  }
+  const out = ternary();
+  if(peek().k !== 'end') throw new Error('trailing "' + peek().v + '"');
+  return out;
+}
+
+/* ============================================================================
+   WebGL2 plumbing
+   ========================================================================== */
+const cv = document.getElementById('gl');
+const gl = cv.getContext('webgl2', {
+  alpha:false, depth:false, stencil:false, antialias:false,
+  premultipliedAlpha:false, preserveDrawingBuffer:false,
+  powerPreference:'high-performance', desynchronized:true
+});
+if(!gl){
+  document.body.innerHTML = '<div class="veil"><div class="card"><h2>WebGL2 required</h2>' +
+    '<p>Chromaflow needs WebGL2, which every current desktop and mobile browser supports. ' +
+    'If you are on an old build, or hardware acceleration is switched off, that is usually the cause.</p></div></div>';
+  throw new Error('no webgl2');
+}
+const EXT_FLOAT = gl.getExtension('EXT_color_buffer_float');
+const EXT_HALF  = gl.getExtension('EXT_color_buffer_half_float');
+const EXT_FLIN  = gl.getExtension('OES_texture_float_linear');
+const CAN_FLOAT_RT = !!(EXT_FLOAT || EXT_HALF);
+const RENDERER = (() => { const d = gl.getExtension('WEBGL_debug_renderer_info');
+  return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : 'GPU'; })();
+
+function compile(type, src){
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src); gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(sh) || '';
+    gl.deleteShader(sh);
+    const m = /ERROR:\s*\d+:(\d+):\s*(.*)/.exec(log);
+    const err = new Error(m ? ('line ' + m[1] + ': ' + m[2]) : log.split('\n')[0]);
+    err.full = log; err.src = src;
+    throw err;
+  }
+  return sh;
+}
+function program(vsSrc, fsSrc){
+  const vs = compile(gl.VERTEX_SHADER, vsSrc), fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+  const p = gl.createProgram();
+  gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+  gl.deleteShader(vs); gl.deleteShader(fs);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    const log = gl.getProgramInfoLog(p); gl.deleteProgram(p); throw new Error('link: ' + log);
+  }
+  p._u = new Map();
+  return p;
+}
+function use(p){ gl.useProgram(p); return p; }
+function loc(p, n){ let l = p._u.get(n); if(l === undefined){ l = gl.getUniformLocation(p, n); p._u.set(n, l); } return l; }
+function u1(p,n,v){ const l = loc(p,n); if(l) gl.uniform1f(l, v); }
+function u2(p,n,a,b){ const l = loc(p,n); if(l) gl.uniform2f(l, a, b); }
+function u4(p,n,a,b,c,d){ const l = loc(p,n); if(l) gl.uniform4f(l, a, b, c, d); }
+function ui(p,n,v){ const l = loc(p,n); if(l) gl.uniform1i(l, v); }
+function bindTex(p, name, unit, tex){
+  gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); ui(p, name, unit);
+}
+function tex2d(w, h, internal, format, type, filter, data){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, data || null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  t._w = w; t._h = h;
+  return t;
+}
+function fbo(...texes){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  texes.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
+  if(texes.length > 1) gl.drawBuffers(texes.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
+  f._tex = texes;
+  return f;
+}
+function target(f, w, h){
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.viewport(0, 0, w, h);
+}
+function quad(){ gl.drawArrays(gl.TRIANGLES, 0, 3); }
+function del(o){ if(!o) return; if(o instanceof WebGLTexture) gl.deleteTexture(o); else gl.deleteFramebuffer(o); }
+
+/* half-float when 32-bit render targets are unavailable */
+const HDR = EXT_FLOAT ? [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT]
+          : EXT_HALF  ? [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT]
+                      : [gl.RGBA8,   gl.RGBA, gl.UNSIGNED_BYTE];
+const PST = (EXT_FLOAT) ? [gl.RGBA32F, gl.RGBA, gl.FLOAT] : [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT];
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+gl.disable(gl.DEPTH_TEST);
+gl.disable(gl.CULL_FACE);
+
+/* ---- persistent resources --------------------------------------------- */
+const SPEC_N = 512, WAVE_N = 1024;
+const specData = new Float32Array(SPEC_N), waveData = new Float32Array(WAVE_N);
+const texSpec = tex2d(SPEC_N, 1, gl.R32F, gl.RED, gl.FLOAT, gl.LINEAR);
+const texWave = tex2d(WAVE_N, 1, gl.R32F, gl.RED, gl.FLOAT, gl.LINEAR);
+const palData = new Uint8Array(256 * 4);
+const texPal  = tex2d(256, 1, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR, palData);
+
+const PART_DIMS = [64, 128, 181, 256, 362, 512, 724, 1024];
+const R = {                       /* sized resources, rebuilt on resize */
+  w:0, h:0, plane:[null,null], planeF:[null,null], lit:null, litF:null,
+  bloom:[], bloomF:[], pdim:0, pst:[null,null], pax:[null,null], pf:[null,null], pi:0, ppi:0
+};
+
+function allocSized(w, h){
+  [R.plane[0], R.plane[1], R.lit].forEach(del);
+  [R.planeF[0], R.planeF[1], R.litF].forEach(del);
+  R.bloom.forEach(del); R.bloomF.forEach(del);
+  R.w = w; R.h = h;
+  for(let i = 0; i < 2; i++){
+    R.plane[i] = tex2d(w, h, HDR[0], HDR[1], HDR[2], gl.LINEAR);
+    R.planeF[i] = fbo(R.plane[i]);
+  }
+  R.lit = tex2d(w, h, HDR[0], HDR[1], HDR[2], gl.LINEAR);
+  R.litF = fbo(R.lit);
+  R.bloom = []; R.bloomF = [];
+  let bw = Math.max(2, w >> 1), bh = Math.max(2, h >> 1);
+  for(let i = 0; i < 5 && bw > 4 && bh > 4; i++){
+    const t = tex2d(bw, bh, HDR[0], HDR[1], HDR[2], gl.LINEAR);
+    R.bloom.push(t); R.bloomF.push(fbo(t));
+    bw = Math.max(2, bw >> 1); bh = Math.max(2, bh >> 1);
+  }
+  clearPlane();
+}
+function allocParticles(dim){
+  if(R.pdim === dim) return;
+  R.pst.forEach(del); R.pax.forEach(del); R.pf.forEach(del);
+  R.pdim = dim;
+  const seed = new Float32Array(dim * dim * 4);
+  for(let i = 0; i < dim * dim; i++){
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.9;
+    seed[i*4] = Math.cos(a)*r; seed[i*4+1] = Math.sin(a)*r;
+    seed[i*4+2] = -Math.sin(a)*0.2; seed[i*4+3] = Math.cos(a)*0.2;
+  }
+  const aux = new Float32Array(dim * dim * 4);
+  for(let i = 0; i < dim * dim; i++){
+    aux[i*4] = Math.random()*3; aux[i*4+1] = 1; aux[i*4+2] = Math.random(); aux[i*4+3] = 0.4 + Math.random();
+  }
+  for(let i = 0; i < 2; i++){
+    R.pst[i] = tex2d(dim, dim, PST[0], PST[1], PST[2], gl.NEAREST, null);
+    R.pax[i] = tex2d(dim, dim, PST[0], PST[1], PST[2], gl.NEAREST, null);
+    R.pf[i] = fbo(R.pst[i], R.pax[i]);
+  }
+  /* RGBA16F and RGBA32F both accept a Float32Array upload, so one path seeds both */
+  gl.bindTexture(gl.TEXTURE_2D, R.pst[0]);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, dim, dim, gl.RGBA, gl.FLOAT, seed);
+  gl.bindTexture(gl.TEXTURE_2D, R.pax[0]);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, dim, dim, gl.RGBA, gl.FLOAT, aux);
+  R.pi = 0;
+}
+function clearPlane(){
+  for(let i = 0; i < 2; i++){ target(R.planeF[i], R.w, R.h); gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT); }
+}
+
+/* ============================================================================
+   Audio: capture, and the analysis the visuals are steered by.
+   ========================================================================== */
+const A = {
+  ctx:null, analyser:null, gainNode:null, node:null, kind:'none', label:'—',
+  freq:null, time:null, prevMag:null,
+  mag:0, bass:0, mid:0, treb:0, level:0, beat:0, beatPhase:0, bpm:0, hue:0,
+  flux:0, fluxHist:new Float32Array(512), fluxAt:0, lastBeat:-9, period:0.5,
+  chroma:new Float32Array(12), chromaSm:new Float32Array(12),
+  gain:1.6, smooth:0.72, attack:0.55, release:0.10, beatT:1.35, ready:false
+};
+
+function audioCtx(){
+  if(!A.ctx){
+    A.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint:'interactive' });
+    A.analyser = A.ctx.createAnalyser();
+    A.analyser.fftSize = 4096;
+    A.analyser.smoothingTimeConstant = 0.55;
+    A.analyser.minDecibels = -96;
+    A.analyser.maxDecibels = -12;
+    A.gainNode = A.ctx.createGain();
+    A.gainNode.connect(A.ctx.destination);
+    A.freq = new Float32Array(A.analyser.frequencyBinCount);
+    A.time = new Float32Array(A.analyser.fftSize);
+    A.prevMag = new Float32Array(A.analyser.frequencyBinCount);
+  }
+  if(A.ctx.state === 'suspended') A.ctx.resume();
+  return A.ctx;
+}
+function detach(){
+  try{ if(A.node) A.node.disconnect(); }catch(e){}
+  if(A.stream){ A.stream.getTracks().forEach(t => t.stop()); A.stream = null; }
+  if(A.demo){ A.demo.stop(); A.demo = null; }
+  const pl = document.getElementById('player');
+  if(A.kind === 'file'){ pl.pause(); }
+  A.node = null; A.kind = 'none';
+}
+function attachStream(stream, kind, label){
+  const ctx = audioCtx();
+  detach();
+  A.stream = stream;
+  A.node = ctx.createMediaStreamSource(stream);
+  A.node.connect(A.analyser);
+  A.kind = kind; A.label = label; A.ready = true;
+  syncSourceUI();
+}
+
+/* ---- built-in generative music, so the page is never silent ------------- */
+function makeDemo(){
+  const ctx = audioCtx();
+  const out = ctx.createGain(); out.gain.value = 0.9;
+  out.connect(A.analyser); out.connect(A.gainNode);
+  const verb = ctx.createConvolver();
+  {
+    const len = ctx.sampleRate * 1.7, buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for(let c = 0; c < 2; c++){ const d = buf.getChannelData(c);
+      for(let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.6); }
+    verb.buffer = buf;
+  }
+  const verbG = ctx.createGain(); verbG.gain.value = 0.30;
+  verb.connect(verbG); verbG.connect(out);
+
+  const noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  { const d = noiseBuf.getChannelData(0); for(let i = 0; i < d.length; i++) d[i] = Math.random()*2-1; }
+  const noise = () => { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; return s; };
+
+  const BPM = 122, SPB = 60/BPM, STEP = SPB/4;
+  const ROOTS = [0, 0, 5, 7, 3, 5, 10, 7];              /* semitone offsets    */
+  const SCALE = [0, 2, 3, 5, 7, 8, 10];                  /* natural minor       */
+  const hz = n => 55 * Math.pow(2, n/12);
+  let step = 0, next = ctx.currentTime + 0.08, timer = 0, bar = 0;
+
+  function env(node, t, a, d, peak){
+    node.gain.setValueAtTime(0.0001, t);
+    node.gain.exponentialRampToValueAtTime(peak, t + a);
+    node.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  }
+  function kick(t){
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.10);
+    env(g, t, 0.004, 0.34, 1.05);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.42);
+  }
+  function snare(t){
+    const n = noise(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.8;
+    env(g, t, 0.003, 0.16, 0.55);
+    n.connect(f); f.connect(g); g.connect(out); g.connect(verb); n.start(t); n.stop(t + 0.25);
+  }
+  function hat(t, open){
+    const n = noise(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    f.type = 'highpass'; f.frequency.value = 8200;
+    env(g, t, 0.002, open ? 0.20 : 0.045, open ? 0.20 : 0.14);
+    n.connect(f); f.connect(g); g.connect(out); n.start(t); n.stop(t + 0.3);
+  }
+  function bass(t, n, dur){
+    const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    o.type = 'sawtooth'; o.frequency.value = hz(n);
+    f.type = 'lowpass'; f.Q.value = 7;
+    f.frequency.setValueAtTime(220, t);
+    f.frequency.exponentialRampToValueAtTime(1500, t + 0.06);
+    f.frequency.exponentialRampToValueAtTime(180, t + dur);
+    env(g, t, 0.008, dur, 0.42);
+    o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.1);
+  }
+  function pad(t, root, dur){
+    [0, 3, 7, 10, 14].forEach((iv, k) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = k % 2 ? 'triangle' : 'sawtooth';
+      o.frequency.value = hz(root + iv + 24) * (1 + (k - 2) * 0.0016);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.055, t + dur*0.35);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(out); g.connect(verb); o.start(t); o.stop(t + dur + 0.2);
+    });
+  }
+  function lead(t, n){
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle'; o.frequency.value = hz(n + 36);
+    env(g, t, 0.006, 0.30, 0.20);
+    o.connect(g); g.connect(out); g.connect(verb); o.start(t); o.stop(t + 0.4);
+  }
+
+  function schedule(){
+    const now = ctx.currentTime;
+    while(next < now + 0.20){
+      const s16 = step % 16, root = ROOTS[(step >> 4) % ROOTS.length];
+      bar = (step >> 4) % 8;
+      if(s16 % 4 === 0) kick(next);
+      if(s16 === 12 && bar % 2 === 1) kick(next + STEP*0.5);
+      if(s16 === 4 || s16 === 12) snare(next);
+      if(s16 % 2 === 0) hat(next, s16 === 14);
+      if(s16 % 2 === 0) bass(next, root + 12 + (s16 === 6 ? 7 : 0), STEP*1.7);
+      if(s16 === 0) pad(next, root, SPB*3.6);
+      if(bar >= 3 && s16 % 2 === 1){
+        const deg = SCALE[(step*3 + bar) % SCALE.length];
+        lead(next, root + deg + (((step >> 1) % 3 === 0) ? 12 : 0));
+      }
+      next += STEP; step++;
+    }
+  }
+  schedule();
+  timer = setInterval(schedule, 45);
+  return { stop(){ clearInterval(timer); try{ out.disconnect(); }catch(e){} } };
+}
+
+async function srcDemo(){
+  audioCtx(); detach();
+  A.demo = makeDemo(); A.kind = 'demo'; A.label = 'Demo music'; A.ready = true;
+  syncSourceUI(); toast('Demo music — a generative loop, made right here');
+}
+async function srcMic(){
+  try{
+    const st = await navigator.mediaDevices.getUserMedia({ audio:{
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+    attachStream(st, 'mic', 'Microphone');
+    toast('Listening to the microphone');
+  }catch(e){ toast('Microphone blocked — check the browser permission'); }
+}
+async function srcTab(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+    return toast('Tab audio needs a desktop Chromium browser');
+  }
+  try{
+    const st = await navigator.mediaDevices.getDisplayMedia({
+      video:{ width:1, height:1, frameRate:1 }, audio:{ autoGainControl:false, echoCancellation:false } });
+    if(!st.getAudioTracks().length){
+      st.getTracks().forEach(t => t.stop());
+      return toast('No audio in that share — tick “Share tab audio”');
+    }
+    st.getVideoTracks().forEach(t => t.stop());
+    attachStream(new MediaStream(st.getAudioTracks()), 'tab', 'Tab / system audio');
+    toast('Visualising the shared tab');
+  }catch(e){ toast('Share cancelled'); }
+}
+function srcFile(file){
+  const ctx = audioCtx();
+  const pl = document.getElementById('player');
+  detach();
+  if(!A.mediaNode){
+    A.mediaNode = ctx.createMediaElementSource(pl);
+    A.mediaNode.connect(A.analyser);
+    A.mediaNode.connect(A.gainNode);
+  }
+  pl.src = URL.createObjectURL(file);
+  pl.style.display = 'block';
+  pl.play().catch(() => {});
+  A.node = null; A.kind = 'file'; A.label = file.name; A.ready = true;
+  syncSourceUI(); toast('Playing ' + file.name);
+}
+
+/* ---- per-frame analysis ------------------------------------------------ */
+const CHROMA_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+let specSm = new Float32Array(SPEC_N);
+
+function analyse(dt, now){
+  if(!A.analyser){ decayIdle(dt); return; }
+  const an = A.analyser, n = an.frequencyBinCount;
+  an.smoothingTimeConstant = A.smooth;
+  an.getFloatFrequencyData(A.freq);
+  an.getFloatTimeDomainData(A.time);
+  const sr = A.ctx.sampleRate, nyq = sr / 2, binHz = nyq / n;
+
+  /* log-spaced spectrum for the shader, with attack/release smoothing */
+  const fMin = 26, fMax = Math.min(17000, nyq);
+  const lg0 = Math.log2(fMin), lg1 = Math.log2(fMax);
+  let flux = 0, bassS = 0, bassN = 0, midS = 0, midN = 0, trebS = 0, trebN = 0;
+  for(let i = 0; i < SPEC_N; i++){
+    const f0 = Math.pow(2, lg0 + (lg1-lg0) * i / SPEC_N);
+    const f1 = Math.pow(2, lg0 + (lg1-lg0) * (i+1) / SPEC_N);
+    let b0 = Math.floor(f0/binHz), b1 = Math.max(b0+1, Math.ceil(f1/binHz));
+    if(b1 > n) b1 = n;
+    let m = -200;
+    for(let b = b0; b < b1; b++) if(A.freq[b] > m) m = A.freq[b];
+    let v = (m + 96) / 84;                                   /* dB → 0..1 */
+    v = Math.max(0, Math.min(1.4, v)) * A.gain;
+    const prev = specSm[i];
+    specSm[i] = v > prev ? prev + (v-prev)*A.attack : prev + (v-prev)*A.release;
+    specData[i] = specSm[i];
+    const d = v - A.prevMag[i]; if(d > 0) flux += d;
+    A.prevMag[i] = v;
+    const fc = (f0+f1)*0.5;
+    if(fc < 170){ bassS += v; bassN++; }
+    else if(fc < 2200){ midS += v; midN++; }
+    else { trebS += v; trebN++; }
+  }
+  flux /= SPEC_N;
+
+  /* waveform, decimated to the texture width */
+  const tstep = A.time.length / WAVE_N;
+  let rms = 0;
+  for(let i = 0; i < WAVE_N; i++){
+    const v = A.time[(i * tstep) | 0];
+    waveData[i] = v; rms += v*v;
+  }
+  rms = Math.sqrt(rms / WAVE_N);
+
+  const lerp = (a, b, k) => a + (b - a) * Math.min(1, k);
+  A.bass  = lerp(A.bass,  bassN ? bassS/bassN : 0, dt*14);
+  A.mid   = lerp(A.mid,   midN  ? midS/midN   : 0, dt*14);
+  A.treb  = lerp(A.treb,  trebN ? trebS/trebN : 0, dt*16);
+  A.level = lerp(A.level, rms * 2.6 * A.gain, dt*12);
+  A.mag   = lerp(A.mag, Math.min(1.6, (A.bass*0.55 + A.mid*0.3 + A.treb*0.15) * 1.5), dt*18);
+
+  /* onset detection against an adaptive threshold over the last ~2 s */
+  A.fluxHist[A.fluxAt] = flux; A.fluxAt = (A.fluxAt + 1) % A.fluxHist.length;
+  const H = 120; let mean = 0;
+  for(let k = 0; k < H; k++) mean += A.fluxHist[(A.fluxAt - 1 - k + A.fluxHist.length*2) % A.fluxHist.length];
+  mean /= H;
+  let vr = 0;
+  for(let k = 0; k < H; k++){ const d = A.fluxHist[(A.fluxAt-1-k+A.fluxHist.length*2)%A.fluxHist.length] - mean; vr += d*d; }
+  const sd = Math.sqrt(vr / H);
+  A.flux = flux;
+  if(flux > mean + sd * A.beatT && now - A.lastBeat > 0.19 && flux > 0.0015){
+    const gap = now - A.lastBeat;
+    if(gap > 0.25 && gap < 2.0) A.period = A.period * 0.82 + gap * 0.18;
+    A.lastBeat = now; A.beat = 1; onBeat();
+  }
+  A.beat = Math.max(0, A.beat - dt * 3.4);
+  A.beatPhase = Math.min(1, (now - A.lastBeat) / Math.max(0.12, A.period));
+  A.bpm = A.bpm * 0.96 + (60 / Math.max(0.2, A.period)) * 0.04;
+
+  /* chroma → a key colour that follows the harmony */
+  A.chroma.fill(0);
+  for(let b = 2; b < n; b++){
+    const f = b * binHz; if(f < 55 || f > 2100) continue;
+    const v = Math.max(0, (A.freq[b] + 96) / 84);
+    A.chroma[((Math.round(12 * Math.log2(f / 440)) % 12) + 21) % 12] += v * v;
+  }
+  let cmax = 1e-6, ci = 0;
+  for(let i = 0; i < 12; i++){
+    A.chromaSm[i] = A.chromaSm[i]*0.90 + A.chroma[i]*0.10;
+    if(A.chromaSm[i] > cmax){ cmax = A.chromaSm[i]; ci = i; }
+  }
+  A.key = CHROMA_NAMES[ci];
+  const targetHue = ((ci * 7) % 12) / 12;                     /* circle of fifths */
+  let dh = targetHue - A.hue; dh -= Math.round(dh);
+  A.hue = (A.hue + dh * Math.min(1, dt * 1.4) + 1) % 1;
+
+  gl.bindTexture(gl.TEXTURE_2D, texSpec);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SPEC_N, 1, gl.RED, gl.FLOAT, specData);
+  gl.bindTexture(gl.TEXTURE_2D, texWave);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WAVE_N, 1, gl.RED, gl.FLOAT, waveData);
+}
+function decayIdle(dt){
+  A.bass *= Math.pow(0.2, dt); A.mid *= Math.pow(0.2, dt); A.treb *= Math.pow(0.2, dt);
+  A.level *= Math.pow(0.2, dt); A.mag *= Math.pow(0.2, dt); A.beat = Math.max(0, A.beat - dt*3);
+}
+
+/* ============================================================================
+   Color maps.  G-Force shipped a 256-entry palette per look; so does this,
+   only it is generated from stops and can rotate under the music.
+   ========================================================================== */
+const PALETTES = {
+  Ion:        [[0,'#000006'],[.18,'#101a4b'],[.42,'#0f6fb8'],[.66,'#39e0d6'],[.86,'#b6ffe9'],[1,'#ffffff']],
+  Ember:      [[0,'#050002'],[.20,'#38040e'],[.45,'#a81616'],[.68,'#ff7a18'],[.87,'#ffd76a'],[1,'#fffdf0']],
+  Ultra:      [[0,'#04000a'],[.20,'#2a0a52'],[.44,'#8a1fb0'],[.64,'#ff45a3'],[.83,'#66e8ff'],[1,'#ffffff']],
+  Chloro:     [[0,'#000603'],[.22,'#04321f'],[.48,'#0f8a3c'],[.70,'#8fe03a'],[.88,'#e8ffa8'],[1,'#ffffff']],
+  Aurora:     [[0,'#000308'],[.18,'#04263a'],[.40,'#00b1a0'],[.60,'#5cf07a'],[.78,'#ff77c8'],[1,'#f4f0ff']],
+  Solar:      [[0,'#02000b'],[.16,'#26034d'],[.38,'#8d0b52'],[.60,'#e6431f'],[.80,'#ffb020'],[1,'#fff6d8']],
+  Bone:       [[0,'#010104'],[.25,'#1b2136'],[.52,'#5a6a91'],[.75,'#b8c4e0'],[1,'#ffffff']],
+  Vapor:      [[0,'#05010c'],[.20,'#3d1150'],[.42,'#f0399b'],[.62,'#ffa9d8'],[.80,'#7de8ff'],[1,'#f0ffff']],
+  Rust:       [[0,'#040202'],[.24,'#2e1206'],[.50,'#8f3d10'],[.72,'#d98f3a'],[.90,'#f2dcae'],[1,'#ffffff']],
+  Mono:       [[0,'#000000'],[.55,'#8a8a94'],[1,'#ffffff']]
+};
+const PAL_NAMES = Object.keys(PALETTES);
+function hex2rgb(h){ return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+function buildPalette(name){
+  const stops = PALETTES[name] || PALETTES.Ion;
+  for(let i = 0; i < 256; i++){
+    const f = i/255;
+    let a = stops[0], b = stops[stops.length-1];
+    for(let k = 0; k < stops.length-1; k++) if(f >= stops[k][0] && f <= stops[k+1][0]){ a = stops[k]; b = stops[k+1]; break; }
+    const span = Math.max(1e-6, b[0]-a[0]);
+    const k = Math.min(1, Math.max(0, (f-a[0])/span));
+    const ca = hex2rgb(a[1]), cb = hex2rgb(b[1]);
+    for(let c = 0; c < 3; c++) palData[i*4+c] = Math.round(ca[c] + (cb[c]-ca[c])*k);
+    palData[i*4+3] = 255;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, texPal);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, palData);
+}
+function paletteCSS(name){
+  const s = (PALETTES[name]||PALETTES.Ion).map(x => x[1] + ' ' + (x[0]*100).toFixed(0) + '%').join(',');
+  return 'linear-gradient(90deg,' + s + ')';
+}
+
+/* ============================================================================
+   Presets — a flow field, a wave shape, an ink rule, a palette and some knobs.
+   ========================================================================== */
+const DEFAULTS = {
+  flow:1, decay:0.965, spin:0.15, zoom:0.02, wave:1, steps:1536, lw:1.8, ink:0.9,
+  pcount:4, pforce:1, psize:2.2, curl:1, drag:0.965, spawn:1,
+  pal:'Ion', palSpin:0.04, palScale:1.35, chroma:0.35, colorMix:0.9,
+  exposure:1.45, bloom:0.95, aberr:0.35, grain:0.22, vig:0.55, mirror:0,
+  gain:1.6, kick:0.7, res:1, adapt:1, ptrForce:1
+};
+const PRESETS = [
+{ name:'Nebula', pal:'Ion',
+  fx:'-y*0.30 + noise(x*1.1 + t*0.07, y*1.1)*0.95*(0.35 + mag)',
+  fy:' x*0.30 + noise(y*1.1 - t*0.06, x*1.1)*0.95*(0.35 + mag)',
+  wx:'cos(s*tau)*(0.52 + w*0.55 + 0.10*sin(s*tau*5 - t*1.1))',
+  wy:'sin(s*tau)*(0.52 + w*0.55 + 0.10*cos(s*tau*7 + t*0.9))',
+  wi:'0.45 + treb*1.1',
+  p:{ spin:0.18, decay:0.968, bloom:0.95 } },
+
+{ name:'Vortex', pal:'Ultra',
+  fx:'-y*(1.05 + bass*1.5) - x*0.22',
+  fy:' x*(1.05 + bass*1.5) - y*0.22',
+  wx:'cos(s*tau*3 + t*0.55)*(0.12 + s*0.82)*(1.0 + w*0.7)',
+  wy:'sin(s*tau*3 + t*0.55)*(0.12 + s*0.82)*(1.0 + w*0.7)',
+  wi:'0.35 + mag*1.2',
+  p:{ decay:0.972, zoom:-0.05, psize:1.8, aberr:0.5 } },
+
+{ name:'Lissajous', pal:'Vapor',
+  fx:'sin(y*3.1 + t*0.45)*0.55',
+  fy:'sin(x*2.7 - t*0.38)*0.55',
+  wx:'sin(s*tau*3 + t*0.33)*(0.78 + w*0.45)',
+  wy:'sin(s*tau*4 + t*0.49 + 1.2)*(0.78 + w*0.45)',
+  wi:'0.5 + level*1.4',
+  p:{ spin:0, decay:0.958, lw:2.4, mirror:0, pcount:3 } },
+
+{ name:'Spectrum ring', pal:'Aurora',
+  fx:'x/max(r,0.03)*sin(r*8.0 - t*2.0)*0.55*(0.25 + bass*1.6)',
+  fy:'y/max(r,0.03)*sin(r*8.0 - t*2.0)*0.55*(0.25 + bass*1.6)',
+  wx:'cos(s*tau)*(0.32 + spec(s)*0.85)',
+  wy:'sin(s*tau)*(0.32 + spec(s)*0.85)',
+  wi:'0.30 + spec(s)*1.6',
+  p:{ spin:0.05, decay:0.955, lw:2.6, steps:1024, pcount:3 } },
+
+{ name:'Skyline', pal:'Ember',
+  fx:'sin(y*2.0 + t*0.3)*0.10',
+  fy:'0.45 + bass*0.9',
+  wx:'s*2.0 - 1.0',
+  wy:'-0.80 + spec(s)*1.35',
+  wi:'0.35 + spec(s)*1.8',
+  p:{ spin:0, zoom:0, decay:0.952, lw:2.2, steps:512, pcount:2, mirror:0, vig:0.7 } },
+
+{ name:'Mandala', pal:'Solar',
+  fx:'-y*0.55 + x*(0.12 - r*0.35) + noise(x*2.0, y*2.0 + t*0.2)*0.4',
+  fy:' x*0.55 + y*(0.12 - r*0.35) + noise(y*2.0, x*2.0 - t*0.2)*0.4',
+  wx:'cos(s*tau*6 + t*0.2)*(0.25 + 0.55*abs(sin(s*tau*3)))*(1.0 + w*0.6)',
+  wy:'sin(s*tau*6 + t*0.2)*(0.25 + 0.55*abs(sin(s*tau*3)))*(1.0 + w*0.6)',
+  wi:'0.4 + mid*1.3',
+  p:{ mirror:8, decay:0.970, spin:0.1, bloom:1.1 } },
+
+{ name:'Aurora', pal:'Chloro',
+  fx:'noise(x*0.65, y*0.65 + t*0.14)*0.85',
+  fy:'0.55 + noise(x*1.3 + t*0.10, y*0.45)*0.7 + bass*0.5',
+  wx:'s*2.0 - 1.0',
+  wy:'noise(s*3.5, t*0.35)*0.55 + w*0.65',
+  wi:'0.4 + treb*1.5',
+  p:{ spin:0, zoom:0, decay:0.962, lw:3.0, pcount:4, vig:0.65, grain:0.3 } },
+
+{ name:'Hyperdrive', pal:'Bone',
+  fx:'x*(0.60 + bass*0.7) + y*0.25',
+  fy:'y*(0.60 + bass*0.7) - x*0.25',
+  wx:'cos(s*tau + t*0.3)*(0.04 + w*0.35)',
+  wy:'sin(s*tau + t*0.3)*(0.04 + w*0.35)',
+  wi:'0.8 + mag*1.5',
+  p:{ decay:0.975, zoom:0, spin:0.05, pcount:5, psize:1.6, pforce:1.5, bloom:1.3, aberr:0.6,
+      ink:3.0, palScale:1.15 } }
+];
+
+/* live state */
+const P = Object.assign({}, DEFAULTS);
+const E = { fx:'', fy:'', wx:'', wy:'', wi:'' };
+let presetIx = 0, autoVJ = false, paused = false, beatCount = 0;
+let palShift = 0;
+
+/* ---- compiled pipeline ------------------------------------------------- */
+let progWarp = null, progWave = null, progPart = null, progPDraw = null,
+    progColor = null, progDown = null, progUp = null, progPost = null;
+
+function buildStatic(){
+  progPDraw = program(VS_PDRAW, FS_PDRAW);
+  progColor = program(VS_QUAD, FS_COLORIZE);
+  progDown  = program(VS_QUAD, FS_DOWN);
+  progUp    = program(VS_QUAD, FS_UP);
+  progPost  = program(VS_QUAD, FS_POST);
+}
+function rebuild(){
+  const err = document.getElementById('exprErr');
+  let cfx, cfy, cwx, cwy, cwi;
+  try{
+    cfx = compileExpr(E.fx); cfy = compileExpr(E.fy);
+    cwx = compileExpr(E.wx); cwy = compileExpr(E.wy); cwi = compileExpr(E.wi);
+  }catch(e){ err.textContent = '⚠ ' + e.message; markErr(true); return false; }
+  let nWarp, nWave, nPart;
+  try{
+    nWarp = program(VS_QUAD, fsWarp(cfx, cfy));
+    nWave = program(vsWave(cwx, cwy, cwi), FS_WAVE);
+    nPart = program(VS_QUAD, fsParticles(cfx, cfy));
+  }catch(e){
+    err.textContent = '⚠ shader: ' + e.message; markErr(true);
+    [nWarp, nWave, nPart].forEach(p => p && gl.deleteProgram(p));
+    return false;
+  }
+  [progWarp, progWave, progPart].forEach(p => p && gl.deleteProgram(p));
+  progWarp = nWarp; progWave = nWave; progPart = nPart;
+  err.textContent = ''; markErr(false);
+  return true;
+}
+function markErr(on){
+  ['eFX','eFY','eWX','eWY','eWI'].forEach(id => document.getElementById(id).classList.toggle('err', on));
+}
+function applyPreset(ix, keepCode){
+  presetIx = ((ix % PRESETS.length) + PRESETS.length) % PRESETS.length;
+  const pr = PRESETS[presetIx];
+  Object.assign(P, DEFAULTS, pr.p || {}, { pal: pr.pal });
+  if(!keepCode){ E.fx = pr.fx; E.fy = pr.fy; E.wx = pr.wx; E.wy = pr.wy; E.wi = pr.wi; }
+  buildPalette(P.pal);
+  rebuild();
+  syncUI();
+  sendOSC('/chromaflow/preset', 's', pr.name);
+}
+
+/* ============================================================================
+   Interaction state
+   ========================================================================== */
+const ptr = { x:0, y:0, down:0, burst:0, vx:0, vy:0, active:false };
+/* a0…a7 in the expression language. midiCC[0] and [1] double as the two Code-tab
+   knob sliders, so a hand-written equation has adjustable parameters even
+   without a MIDI controller plugged in; a connected controller simply overwrites
+   the same slots live. */
+const midiCC = new Float32Array(8); midiCC[0] = midiCC[1] = 0.5;
+const tilt = { on:false, x:0, y:0 };
+let adaptScale = 1, frameMs = 16, dpr = 1, cssW = 1, cssH = 1;
+
+/* ============================================================================
+   OSC output — real-time sync out to openFrameworks, TouchDesigner, Max/MSP,
+   Pure Data, or anything else that speaks OSC.  Browsers cannot open a raw UDP
+   socket, so this speaks OSC-over-WebSocket to the small bridge in
+   osc-bridge.js, which is the part that actually puts the bytes on UDP.  The
+   wire format the bridge forwards is real, standard OSC — encoded here so
+   nothing on the far end needs to know a browser was ever involved. */
+const OSC = { ws:null, connected:false, nextAt:0 };
+function oscString(str){
+  const bytes = []; for(let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i) & 0xff);
+  const nullCount = 4 - (bytes.length % 4);
+  for(let i = 0; i < nullCount; i++) bytes.push(0);
+  return new Uint8Array(bytes);
+}
+function encodeOSC(address, tag, value){
+  const addr = oscString(address), tags = oscString(',' + tag);
+  const argBuf = new ArrayBuffer(4), dv = new DataView(argBuf);
+  if(tag === 'f') dv.setFloat32(0, value, false);
+  else if(tag === 'i') dv.setInt32(0, value | 0, false);
+  const arg = tag === 's' ? oscString(String(value)) : new Uint8Array(argBuf);
+  const out = new Uint8Array(addr.length + tags.length + arg.length);
+  out.set(addr, 0); out.set(tags, addr.length); out.set(arg, addr.length + tags.length);
+  return out;
+}
+function sendOSC(address, tag, value){
+  if(!OSC.connected || !OSC.ws || OSC.ws.readyState !== 1) return;
+  try{ OSC.ws.send(encodeOSC(address, tag, value)); }catch(e){}
+}
+function oscToggle(){
+  if(OSC.ws){ OSC.ws.close(); return; }
+  const url = $('oscUrl').value.trim();
+  let ws;
+  try{ ws = new WebSocket(url); }catch(e){ return toast('Not a valid WebSocket URL'); }
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    OSC.connected = true;
+    $('bOsc').textContent = '🔌 Disconnect OSC'; $('bOsc').classList.add('on');
+    toast('OSC bridge connected');
+  };
+  ws.onclose = () => {
+    OSC.connected = false; OSC.ws = null;
+    $('bOsc').textContent = '🔌 Connect OSC bridge'; $('bOsc').classList.remove('on');
+  };
+  ws.onerror = () => toast('OSC bridge unreachable — is osc-bridge.js running?');
+  OSC.ws = ws;
+}
+
+function fieldCoords(ev){
+  const rect = cv.getBoundingClientRect();
+  const asp = cssW / cssH;
+  return { x:((ev.clientX - rect.left)/rect.width*2 - 1)*asp, y:-((ev.clientY - rect.top)/rect.height*2 - 1) };
+}
+cv.addEventListener('pointerdown', ev => {
+  const f = fieldCoords(ev); ptr.x = f.x; ptr.y = f.y; ptr.down = 1; ptr.burst = 1; ptr.active = true;
+  cv.setPointerCapture(ev.pointerId); audioCtx();
+});
+cv.addEventListener('pointermove', ev => {
+  const f = fieldCoords(ev);
+  ptr.vx = f.x - ptr.x; ptr.vy = f.y - ptr.y; ptr.x = f.x; ptr.y = f.y; ptr.active = true;
+});
+addEventListener('pointerup',     () => { ptr.down = 0; });
+addEventListener('pointercancel', () => { ptr.down = 0; });
+cv.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  P.zoom = Math.max(-0.5, Math.min(0.5, P.zoom + Math.sign(ev.deltaY) * 0.012));
+  syncUI();
+}, { passive:false });
+
+/* ---- keyboard ---------------------------------------------------------- */
+addEventListener('keydown', ev => {
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
+  const k = ev.key;
+  if(k === ' '){ ev.preventDefault(); applyPreset(presetIx + 1); toast(PRESETS[presetIx].name); }
+  else if(k === 'ArrowRight'){ applyPreset(presetIx + 1); toast(PRESETS[presetIx].name); }
+  else if(k === 'ArrowLeft'){ applyPreset(presetIx - 1); toast(PRESETS[presetIx].name); }
+  else if(k >= '1' && k <= '8'){ applyPreset(+k - 1); toast(PRESETS[presetIx].name); }
+  else if(k === 'a' || k === 'A'){ setAutoVJ(!autoVJ); }
+  else if(k === 'r' || k === 'R'){ randomise(); }
+  else if(k === 'c' || k === 'C'){ document.body.classList.toggle('no-console'); syncUI(); }
+  else if(k === 'h' || k === 'H'){ document.body.classList.toggle('cinema'); }
+  else if(k === 'f' || k === 'F'){ toggleFull(); }
+  else if(k === 'm' || k === 'M'){ cycleSource(); }
+  else if(k === 'p' || k === 'P'){ paused = !paused; toast(paused ? 'Paused' : 'Running'); }
+  else if(k === '['){ P.pcount = Math.max(0, P.pcount - 1); syncUI(); toast(partCount() + ' particles'); }
+  else if(k === ']'){ P.pcount = Math.min(7, P.pcount + 1); syncUI(); toast(partCount() + ' particles'); }
+  else if(k === '?' || k === '/'){ const h = document.getElementById('help'); h.hidden = !h.hidden; }
+  else if(k === 'Escape'){ document.getElementById('help').hidden = true; if(autoVJ) setAutoVJ(false); else document.body.classList.remove('cinema'); }
+});
+function partCount(){ const d = PART_DIMS[P.pcount|0]; const n = d*d;
+  return n >= 1e6 ? (n/1e6).toFixed(1) + 'M' : Math.round(n/1000) + 'k'; }
+
+/* Auto-VJ is a "just play it" mode: turning it on goes fullscreen and hides
+   every bit of chrome, so the visualizer is the whole screen. Turning it off
+   (from any source — the button, the A key, or the viewer backing out of
+   fullscreen themselves) brings the console back. */
+function setAutoVJ(on){
+  autoVJ = on;
+  if(on){
+    document.body.classList.add('cinema');
+    if(!document.fullscreenElement && document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  } else {
+    document.body.classList.remove('cinema');
+    if(document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+  syncUI();
+  toast('Auto-VJ ' + (on ? 'on — fullscreen' : 'off'));
+}
+addEventListener('fullscreenchange', () => {
+  if(!document.fullscreenElement && autoVJ) setAutoVJ(false);
+});
+
+function toggleFull(){
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(()=>{});
+}
+
+/* ---- randomiser: a fresh look from a small grammar --------------------- */
+const rnd = (a, b) => a + Math.random()*(b-a);
+const pick = arr => arr[(Math.random()*arr.length)|0];
+const num = (a, b, d) => rnd(a, b).toFixed(d === undefined ? 2 : d);
+function randFlow(){
+  const swirl = num(-1.4, 1.4), pull = num(-0.5, 0.5), nz = num(0.2, 1.2), sc = num(0.5, 2.6);
+  const drive = pick(['bass','mid','treb','mag','level']);
+  const kind = (Math.random()*4)|0;
+  if(kind === 0) return [
+    `${-swirl}*y + ${pull}*x + noise(x*${sc} + t*${num(0.03,0.2)}, y*${sc})*${nz}*(0.3 + ${drive})`,
+    `${swirl}*x + ${pull}*y + noise(y*${sc} - t*${num(0.03,0.2)}, x*${sc})*${nz}*(0.3 + ${drive})`];
+  if(kind === 1) return [
+    `x/max(r,0.03)*sin(r*${num(4,14,1)} - t*${num(0.8,3)})*${num(0.2,0.9)}*(0.2 + ${drive}*1.5)`,
+    `y/max(r,0.03)*sin(r*${num(4,14,1)} - t*${num(0.8,3)})*${num(0.2,0.9)}*(0.2 + ${drive}*1.5)`];
+  if(kind === 2) return [
+    `sin(y*${num(1.5,4.5)} + t*${num(0.2,0.9)})*${num(0.3,0.9)} + ${swirl}*0.3*y`,
+    `sin(x*${num(1.5,4.5)} - t*${num(0.2,0.9)})*${num(0.3,0.9)} + ${swirl}*0.3*x`];
+  return [
+    `x*(${num(0.4,1.6)} + ${drive}*${num(0.5,2.2)}) + y*${num(-0.5,0.5)}`,
+    `y*(${num(0.4,1.6)} + ${drive}*${num(0.5,2.2)}) - x*${num(-0.5,0.5)}`];
+}
+function randWave(){
+  const kind = (Math.random()*4)|0;
+  const amp = num(0.35, 0.85), wob = num(0.3, 0.9);
+  if(kind === 0) return [
+    `cos(s*tau)*(${amp} + w*${wob} + ${num(0.05,0.25)}*sin(s*tau*${(2+Math.random()*7)|0} - t*${num(0.4,1.6)}))`,
+    `sin(s*tau)*(${amp} + w*${wob} + ${num(0.05,0.25)}*cos(s*tau*${(2+Math.random()*7)|0} + t*${num(0.4,1.6)}))`];
+  if(kind === 1) return [
+    `sin(s*tau*${(2+Math.random()*5)|0} + t*${num(0.2,0.6)})*(${amp} + w*${wob})`,
+    `sin(s*tau*${(2+Math.random()*5)|0} + t*${num(0.2,0.6)} + ${num(0.5,2.5)})*(${amp} + w*${wob})`];
+  if(kind === 2) return [`s*2.0 - 1.0`, `${num(-0.85,-0.4)} + spec(s)*${num(0.9,1.6)}`];
+  return [
+    `cos(s*tau*${(3+Math.random()*6)|0} + t*${num(0.1,0.5)})*(${num(0.15,0.35)} + ${num(0.35,0.7)}*abs(sin(s*tau*${(2+Math.random()*4)|0})))*(1.0 + w*0.6)`,
+    `sin(s*tau*${(3+Math.random()*6)|0} + t*${num(0.1,0.5)})*(${num(0.15,0.35)} + ${num(0.35,0.7)}*abs(sin(s*tau*${(2+Math.random()*4)|0})))*(1.0 + w*0.6)`];
+}
+function randomise(){
+  const [fx, fy] = randFlow(), [wx, wy] = randWave();
+  Object.assign(P, DEFAULTS, {
+    pal: pick(PAL_NAMES),
+    decay: +rnd(0.935, 0.978).toFixed(3),
+    spin: +rnd(-0.6, 0.6).toFixed(2),
+    zoom: +rnd(-0.10, 0.10).toFixed(3),
+    lw: +rnd(1.2, 3.4).toFixed(1),
+    mirror: Math.random() < 0.35 ? pick([3,4,5,6,8,12]) : 0,
+    pcount: 3 + ((Math.random()*3)|0),
+    bloom: +rnd(0.5, 1.4).toFixed(2),
+    aberr: +rnd(0, 0.7).toFixed(2),
+    steps: pick([512, 1024, 1536, 2048, 3072])
+  });
+  E.fx = fx; E.fy = fy; E.wx = wx; E.wy = wy;
+  E.wi = `${num(0.3,0.7)} + ${pick(['treb','mid','mag','level'])}*${num(0.8,1.8)}`;
+  buildPalette(P.pal);
+  if(!rebuild()) applyPreset(presetIx);
+  syncUI();
+  toast('New look — press R again, or Revert in the Code tab');
+}
+function onBeat(){
+  beatCount++;
+  sendOSC('/chromaflow/beat', 'f', 1.0);
+  if(autoVJ && beatCount % 32 === 0){ applyPreset(presetIx + 1); toast('Auto-VJ → ' + PRESETS[presetIx].name); }
+}
+
+/* ============================================================================
+   Frame
+   ========================================================================== */
+function resize(){
+  const r = cv.getBoundingClientRect();
+  cssW = Math.max(1, r.width); cssH = Math.max(1, r.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  /* quantised so that adapting does not reallocate every framebuffer each frame */
+  const scale = P.res * (P.adapt > 0.5 ? Math.round(adaptScale*10)/10 : 1);
+  let w = Math.round(cssW * dpr * scale), h = Math.round(cssH * dpr * scale);
+  w = Math.max(320, Math.min(3840, w)); h = Math.max(240, Math.min(2160, h));
+  if(w !== R.w || h !== R.h){ cv.width = w; cv.height = h; allocSized(w, h); }
+}
+function setCommon(p){
+  const asp = R.w / R.h;
+  u2(p, 'uRes', R.w, R.h);
+  u1(p, 'uAsp', asp);
+  u1(p, 'uTime', T.t); u1(p, 'uDt', T.dt);
+  u1(p, 'uMag', A.mag); u1(p, 'uBass', A.bass); u1(p, 'uMid', A.mid);
+  u1(p, 'uTreb', A.treb); u1(p, 'uLevel', A.level);
+  u1(p, 'uBeat', A.beat); u1(p, 'uBeatPhase', A.beatPhase); u1(p, 'uHue', A.hue); u1(p, 'uBPM', A.bpm);
+  for(let i = 0; i < 8; i++) u1(p, 'uA' + i, midiCC[i]);
+  u4(p, 'uPtr', ptr.x, ptr.y, Math.min(1.6, ptr.down + ptr.burst * 1.6), 0);
+  bindTex(p, 'uSpec', 0, texSpec);
+  bindTex(p, 'uWave', 1, texWave);
+}
+const T = { t:0, dt:1/60, last:0, fps:60, frames:0, fpsAt:0 };
+
+function frame(now){
+  requestAnimationFrame(frame);
+  now *= 0.001;
+  let dt = T.last ? now - T.last : 1/60;
+  T.last = now;
+  dt = Math.min(0.05, Math.max(0.001, dt));
+  /* Testing hook: window.chromaflowFixedDt = 1/60 makes every frame advance the
+     simulation by the same slice, so an offline capture is deterministic and a
+     software renderer shows what real hardware would. */
+  if(window.chromaflowFixedDt > 0) dt = window.chromaflowFixedDt;
+  T.dt = paused ? 0 : dt;
+  T.t += T.dt;
+
+  const t0 = performance.now();
+  A.gain = P.gain;
+  analyse(dt, now);
+  if(OSC.connected && now >= OSC.nextAt){
+    OSC.nextAt = now + 0.04;                       /* ~25 Hz — plenty for visual sync, not flooding UDP */
+    sendOSC('/chromaflow/bass', 'f', A.bass);
+    sendOSC('/chromaflow/mid', 'f', A.mid);
+    sendOSC('/chromaflow/treb', 'f', A.treb);
+    sendOSC('/chromaflow/level', 'f', A.level);
+    sendOSC('/chromaflow/mag', 'f', A.mag);
+    sendOSC('/chromaflow/bpm', 'f', A.bpm);
+    sendOSC('/chromaflow/hue', 'f', A.hue);
+    sendOSC('/chromaflow/phase', 'f', A.beatPhase);
+  }
+  resize();
+  allocParticles(PART_DIMS[P.pcount | 0]);
+  ptr.burst = Math.max(0, ptr.burst - dt * 2.2);
+
+  const cur = R.pi, nxt = 1 - cur;
+  const kick = 1 + A.beat * P.kick;
+  /* One draw deposits ink for one frame's worth of time; scaling by dt keeps the
+     equilibrium brightness the same at 30, 60 or 144 fps. */
+  const inkStep = Math.min(8, T.dt * 60);
+
+  /* 1 — advect the plane through the flow field */
+  if(progWarp){
+    const p = use(progWarp);
+    target(R.planeF[nxt], R.w, R.h);
+    gl.disable(gl.BLEND);
+    setCommon(p);
+    u1(p, 'uDecay', P.decay); u1(p, 'uFlow', P.flow * kick);
+    u1(p, 'uSpin', P.spin); u1(p, 'uZoom', P.zoom); u1(p, 'uPtrForce', P.ptrForce);
+    bindTex(p, 'uPlane', 2, R.plane[cur]);
+    quad();
+  }
+
+  gl.enable(gl.BLEND);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFunc(gl.ONE, gl.ONE);
+
+  /* 2 — particles: integrate, then splat into the same plane */
+  if(progPart && P.pcount > 0){
+    const pi = R.ppi, pn = 1 - pi;
+    const p = use(progPart);
+    target(R.pf[pn], R.pdim, R.pdim);
+    gl.disable(gl.BLEND);
+    setCommon(p);
+    u1(p, 'uPForce', P.pforce); u1(p, 'uCurl', P.curl); u1(p, 'uFlow', P.flow * kick);
+    u1(p, 'uSpin', P.spin); u1(p, 'uPtrForce', P.ptrForce); u1(p, 'uDrag', P.drag); u1(p, 'uSpawn', P.spawn);
+    bindTex(p, 'uState', 2, R.pst[pi]);
+    bindTex(p, 'uAux',   3, R.pax[pi]);
+    quad();
+    R.ppi = pn;
+
+    const q = use(progPDraw);
+    target(R.planeF[nxt], R.w, R.h);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    u1(q, 'uAsp', R.w / R.h); u1(q, 'uPSize', P.psize * dpr * (P.adapt > 0.5 ? adaptScale : 1));
+    u1(q, 'uTexDim', R.pdim); u1(q, 'uBeat', A.beat); u1(q, 'uLevel', A.level);
+    u1(q, 'uInk', 0.0065 * P.ink * inkStep * (131044 / (R.pdim*R.pdim)));
+    bindTex(q, 'uState', 2, R.pst[pn]);
+    bindTex(q, 'uAux',   3, R.pax[pn]);
+    gl.drawArrays(gl.POINTS, 0, R.pdim * R.pdim);
+  }
+
+  /* 3 — the wave shape, as an antialiased ribbon */
+  if(progWave){
+    const p = use(progWave);
+    target(R.planeF[nxt], R.w, R.h);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    setCommon(p);
+    const steps = Math.max(8, Math.round(P.steps));
+    u1(p, 'uSteps', steps); u1(p, 'uAmp', P.wave); u1(p, 'uLW', P.lw * dpr);
+    u1(p, 'uInk', 0.032 * P.ink * inkStep);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, steps * 2);
+  }
+  R.pi = nxt;
+
+  /* 4 — the color map turns ink into light */
+  gl.disable(gl.BLEND);
+  {
+    const p = use(progColor);
+    target(R.litF, R.w, R.h);
+    palShift = (palShift + T.dt * P.palSpin + (A.beat * P.kick * 0.004)) % 1;
+    const shift = (palShift + P.chroma * A.hue + 1) % 1;
+    u1(p, 'uPalShift', shift); u1(p, 'uPalScale', P.palScale);
+    u1(p, 'uExposure', P.exposure); u1(p, 'uColorMix', P.colorMix);
+    bindTex(p, 'uPlane', 2, R.plane[nxt]);
+    bindTex(p, 'uPal', 4, texPal);
+    quad();
+  }
+
+  /* 5 — bloom: box down, tent up */
+  let bloomTex = R.lit;
+  if(R.bloom.length && P.bloom > 0.001){
+    let src = R.lit, sw = R.w, sh = R.h;
+    const p = use(progDown);
+    for(let i = 0; i < R.bloom.length; i++){
+      const t = R.bloom[i];
+      target(R.bloomF[i], t._w, t._h);
+      u2(p, 'uTexel', 1/sw, 1/sh);
+      u1(p, 'uThresh', i === 0 ? 0.55 : 0.0);
+      bindTex(p, 'uSrc', 2, src);
+      quad();
+      src = t; sw = t._w; sh = t._h;
+    }
+    const q = use(progUp);
+    for(let i = R.bloom.length - 2; i >= 0; i--){
+      const t = R.bloom[i], s = R.bloom[i+1];
+      target(R.bloomF[i], t._w, t._h);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+      u2(q, 'uTexel', 1/s._w, 1/s._h);
+      bindTex(q, 'uSrc', 2, s);
+      quad();
+      gl.disable(gl.BLEND);
+    }
+    bloomTex = R.bloom[0];
+  }
+
+  /* 6 — composite */
+  {
+    const p = use(progPost);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cv.width, cv.height);
+    u2(p, 'uRes', cv.width, cv.height);
+    u1(p, 'uAsp', cv.width / cv.height); u1(p, 'uTime', T.t);
+    u1(p, 'uBloomAmt', (R.bloom.length ? P.bloom : 0) * 0.55);
+    u1(p, 'uAberr', P.aberr); u1(p, 'uGrain', P.grain); u1(p, 'uVig', P.vig);
+    u1(p, 'uMirror', Math.round(P.mirror)); u1(p, 'uBeat', A.beat);
+    u1(p, 'uExposure2', 1 + A.beat * P.kick * 0.5);
+    bindTex(p, 'uLit', 2, R.lit);
+    bindTex(p, 'uBloom', 3, bloomTex);
+    quad();
+  }
+
+  /* adaptive resolution + readouts */
+  frameMs = frameMs * 0.90 + (performance.now() - t0) * 0.10;
+  if(P.adapt > 0.5){
+    if(dt > 0.0215 && adaptScale > 0.5) adaptScale = Math.max(0.5, adaptScale - 0.012);
+    else if(dt < 0.0150 && adaptScale < 1) adaptScale = Math.min(1, adaptScale + 0.004);
+  } else adaptScale = 1;
+  T.frames++;
+  if(now - T.fpsAt > 0.5){ T.fps = T.frames / (now - T.fpsAt); T.frames = 0; T.fpsAt = now; readouts(); }
+  pollPads();
+}
+
+/* ============================================================================
+   UI
+   ========================================================================== */
+const $ = id => document.getElementById(id);
+const SLIDERS = [
+  ['uFlow','flow',2], ['uDecay','decay',3], ['uSpin','spin',2], ['uZoom','zoom',3],
+  ['uWave','wave',2], ['uSteps','steps',0], ['uLW','lw',1], ['uInkS','ink',2],
+  ['uPCount','pcount',0], ['uPForce','pforce',2], ['uPSize','psize',1],
+  ['uPalSpin','palSpin',2], ['uChroma','chroma',2], ['uExp','exposure',2], ['uBloom','bloom',2],
+  ['uAberr','aberr',2], ['uGrain','grain',2], ['uVig','vig',2], ['uMirror','mirror',0],
+  ['uGain','gain',2], ['uKick','kick',2], ['uRes','res',2], ['uAdapt','adapt',0],
+  ['uSmooth','A:smooth',2], ['uAttack','A:attack',2], ['uRelease','A:release',3], ['uBeatT','A:beatT',2]
+];
+function getParam(key){ return key.startsWith('A:') ? A[key.slice(2)] : P[key]; }
+function setParam(key, v){ if(key.startsWith('A:')) A[key.slice(2)] = v; else P[key] = v; }
+
+let toastTimer = 0;
+function toast(msg){
+  const el = $('toast'); el.textContent = msg; el.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('on'), 2200);
+}
+function syncUI(){
+  for(const [id, key, d] of SLIDERS){
+    const el = $(id); if(!el) continue;
+    const v = getParam(key);
+    if(document.activeElement !== el) el.value = v;
+    const out = el.parentElement.querySelector('output');
+    if(out) out.textContent = key === 'pcount' ? partCount()
+      : key === 'adapt' ? (v > 0.5 ? 'on' : 'off')
+      : (+v).toFixed(d);
+  }
+  $('eFX').value = E.fx; $('eFY').value = E.fy;
+  $('eWX').value = E.wx; $('eWY').value = E.wy; $('eWI').value = E.wi;
+  $('selPreset').value = String(presetIx);
+  $('bAuto').classList.toggle('on', autoVJ);
+  $('bConsole').classList.toggle('on', !document.body.classList.contains('no-console'));
+  document.querySelectorAll('#presetChips button').forEach((b, i) => b.classList.toggle('on', i === presetIx));
+  document.querySelectorAll('#palSw button').forEach(b => {
+    b.style.outline = b.dataset.pal === P.pal ? '2px solid var(--accent)' : 'none';
+    b.style.outlineOffset = '1px';
+  });
+}
+function syncSourceUI(){
+  const map = { demo:'bDemo', mic:'bMic', tab:'bTab', file:'bFile' };
+  Object.values(map).forEach(id => $(id).classList.remove('on'));
+  if(map[A.kind]) $(map[A.kind]).classList.add('on');
+  $('bSrc').textContent = ({ demo:'✨ Demo', mic:'🎤 Mic', tab:'🖥 Tab', file:'🎵 File' })[A.kind] || '🎤 Source';
+  $('player').style.display = A.kind === 'file' ? 'block' : 'none';
+}
+function readouts(){
+  const bars = $('meters').children;
+  for(let i = 0; i < bars.length; i++){
+    const f = i / bars.length;
+    const ix = Math.min(SPEC_N-1, Math.round(Math.pow(f, 1.25) * (SPEC_N-1)));
+    bars[i].style.height = Math.max(2, Math.min(26, specData[ix] * 26)) + 'px';
+  }
+  $('now').innerHTML = '<b>' + PRESETS[presetIx].name + '</b> · ' + P.pal + ' · ' + A.label +
+    (A.bpm > 40 && A.ready ? ' · ' + Math.round(A.bpm) + ' BPM' : '') +
+    (A.key ? ' · key ' + A.key : '');
+  $('stat').innerHTML = '<b>' + T.fps.toFixed(0) + '</b> fps · ' + R.w + '×' + R.h +
+    ' · ' + partCount() + ' · ' + frameMs.toFixed(1) + ' ms';
+}
+function cycleSource(){
+  const order = ['demo','mic','tab','file'];
+  const i = (order.indexOf(A.kind) + 1) % order.length;
+  ({ demo:srcDemo, mic:srcMic, tab:srcTab, file:() => $('fileIn').click() })[order[i]]();
+}
+
+/* meters + preset chips + palette swatches */
+{
+  const m = $('meters');
+  for(let i = 0; i < 26; i++) m.appendChild(document.createElement('i'));
+  const chips = $('presetChips'), sel = $('selPreset');
+  PRESETS.forEach((pr, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = (i+1) + '. ' + pr.name;
+    b.onclick = () => { applyPreset(i); toast(pr.name); };
+    chips.appendChild(b);
+    const o = document.createElement('option'); o.value = String(i); o.textContent = pr.name; sel.appendChild(o);
+  });
+  sel.onchange = () => applyPreset(+sel.value);
+  const sw = $('palSw');
+  PAL_NAMES.forEach(n => {
+    const b = document.createElement('button');
+    b.dataset.pal = n; b.title = n; b.style.background = paletteCSS(n);
+    b.onclick = () => { P.pal = n; buildPalette(n); syncUI(); };
+    sw.appendChild(b);
+  });
+}
+
+/* sliders */
+for(const [id, key] of SLIDERS){
+  const el = $(id); if(!el) continue;
+  el.addEventListener('input', () => {
+    setParam(key, parseFloat(el.value));
+    if(key === 'res') adaptScale = 1;
+    syncUI();
+  });
+}
+
+/* the two hand-turnable knobs (a0, a1) — MIDI CC 1/2 drive the same slots */
+['uK0','uK1'].forEach((id, i) => {
+  const el = $(id);
+  el.value = midiCC[i];
+  el.parentElement.querySelector('output').textContent = midiCC[i].toFixed(2);
+  el.addEventListener('input', () => {
+    midiCC[i] = parseFloat(el.value);
+    el.parentElement.querySelector('output').textContent = midiCC[i].toFixed(2);
+  });
+});
+
+/* tabs */
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === b.dataset.pane));
+});
+
+/* ---- state: the same shape backs the share link, local saves and the URL
+   loader, so a design can move between all three freely. ---- */
+function buildState(){
+  const state = { v:1, p:presetIx, e:{ fx:E.fx, fy:E.fy, wx:E.wx, wy:E.wy, wi:E.wi }, k:{} };
+  for(const k in P) if(P[k] !== DEFAULTS[k]) state.k[k] = P[k];
+  return state;
+}
+function applyState(st){
+  if(!st || st.v !== 1 || !st.e) return false;
+  presetIx = Math.max(0, Math.min(PRESETS.length-1, st.p|0));
+  Object.assign(P, DEFAULTS, PRESETS[presetIx].p || {}, { pal:PRESETS[presetIx].pal });
+  Object.assign(E, PRESETS[presetIx]);
+  ['fx','fy','wx','wy','wi'].forEach(k => { if(typeof st.e[k] === 'string') E[k] = st.e[k].slice(0, 800); });
+  for(const k in (st.k || {})) if(k in DEFAULTS && typeof st.k[k] === typeof DEFAULTS[k]) P[k] = st.k[k];
+  buildPalette(P.pal);
+  return rebuild();
+}
+
+/* ---- "My presets": named local saves, kept in this browser only ---- */
+const SAVE_KEY = 'chromaflow.saved.v1';
+function loadSaved(){
+  try{ const v = JSON.parse(localStorage.getItem(SAVE_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+function writeSaved(list){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); return true; }
+  catch(e){ toast('Could not save — browser storage is full or blocked'); return false; }
+}
+function saveCurrentAs(name){
+  name = (name || '').trim().slice(0, 60);
+  if(!name) return;
+  const list = loadSaved();
+  const entry = { name, savedAt: Date.now(), state: buildState() };
+  const ix = list.findIndex(s => s.name === name);
+  if(ix >= 0) list[ix] = entry; else list.push(entry);
+  if(writeSaved(list)){ renderSaved(); toast((ix >= 0 ? 'Updated “' : 'Saved “') + name + '”'); }
+}
+function deleteSaved(name){
+  if(writeSaved(loadSaved().filter(s => s.name !== name))) renderSaved();
+}
+function renderSaved(){
+  const wrap = $('savedList'), list = loadSaved().sort((a, b) => b.savedAt - a.savedAt);
+  $('savedCount').textContent = list.length ? (list.length + ' saved') : '';
+  wrap.innerHTML = '';
+  if(!list.length){
+    wrap.innerHTML = '<p class="hint">Nothing saved yet — write an equation above, then Save.</p>';
+    return;
+  }
+  for(const entry of list){
+    const row = document.createElement('div'); row.className = 'savedRow';
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = entry.name;
+    b.title = new Date(entry.savedAt).toLocaleString();
+    b.onclick = () => {
+      if(applyState(entry.state)){ syncUI(); toast('Loaded “' + entry.name + '”'); }
+      else toast('That saved equation no longer compiles');
+    };
+    const x = document.createElement('button'); x.className = 'icon'; x.textContent = '×'; x.title = 'Delete';
+    x.onclick = ev => { ev.stopPropagation(); deleteSaved(entry.name); };
+    row.append(b, x);
+    wrap.appendChild(row);
+  }
+}
+
+/* live expression editing */
+{
+  let deb = 0;
+  const bind = (id, key) => $(id).addEventListener('input', () => {
+    E[key] = $(id).value;
+    clearTimeout(deb); deb = setTimeout(rebuild, 180);
+  });
+  bind('eFX','fx'); bind('eFY','fy'); bind('eWX','wx'); bind('eWY','wy'); bind('eWI','wi');
+  $('bRevert').onclick = () => { applyPreset(presetIx); toast('Reverted to ' + PRESETS[presetIx].name); };
+  $('bShare').onclick = async () => {
+    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(buildState()))))
+      .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    const url = location.origin + location.pathname + '#' + enc;
+    try{ await navigator.clipboard.writeText(url); toast('Share link copied'); }
+    catch(e){ location.hash = enc; toast('Link is in the address bar'); }
+    history.replaceState(null, '', '#' + enc);
+  };
+  $('bSaveNew').onclick = () => {
+    const name = prompt('Save this equation as:', PRESETS[presetIx].name + ' (edit)');
+    if(name !== null) saveCurrentAs(name);
+  };
+  $('bExport').onclick = async () => {
+    const list = loadSaved();
+    if(!list.length) return toast('Nothing saved yet');
+    const json = JSON.stringify(list);
+    try{ await navigator.clipboard.writeText(json); toast('Copied ' + list.length + ' saved preset' + (list.length>1?'s':'') + ' as JSON'); }
+    catch(e){ prompt('Copy this text to back it up:', json); }
+  };
+  $('bImport').onclick = () => {
+    const text = prompt('Paste exported JSON to import:', '');
+    if(!text) return;
+    try{
+      const incoming = JSON.parse(text);
+      if(!Array.isArray(incoming)) throw new Error('not a list');
+      const list = loadSaved();
+      let added = 0, updated = 0;
+      for(const entry of incoming){
+        if(!entry || typeof entry.name !== 'string' || !entry.state) continue;
+        const ix = list.findIndex(s => s.name === entry.name);
+        if(ix >= 0){ list[ix] = entry; updated++; } else { list.push(entry); added++; }
+      }
+      if(writeSaved(list)){ renderSaved(); toast('Imported ' + added + ' new, updated ' + updated); }
+    }catch(e){ toast('That did not look like exported JSON'); }
+  };
+  renderSaved();
+}
+function loadHash(){
+  const h = location.hash.slice(1);
+  if(!h || h.length < 8) return false;
+  try{
+    const json = decodeURIComponent(escape(atob(h.replace(/-/g,'+').replace(/_/g,'/'))));
+    return applyState(JSON.parse(json));
+  }catch(e){ return false; }
+}
+
+/* buttons */
+$('bPrev').onclick = () => { applyPreset(presetIx - 1); toast(PRESETS[presetIx].name); };
+$('bNext').onclick = () => { applyPreset(presetIx + 1); toast(PRESETS[presetIx].name); };
+$('bAuto').onclick = () => setAutoVJ(!autoVJ);
+$('bConsole').onclick = () => { document.body.classList.toggle('no-console'); syncUI(); };
+$('bHelp').onclick = () => { $('help').hidden = !$('help').hidden; };
+$('hClose').onclick = () => { $('help').hidden = true; };
+$('bFull').onclick = toggleFull;
+$('bSrc').onclick = cycleSource;
+$('bMic').onclick = srcMic; $('bTab').onclick = srcTab; $('bDemo').onclick = srcDemo;
+$('iMic').onclick = () => { closeIntro(); srcMic(); };
+$('iTab').onclick = () => { closeIntro(); srcTab(); };
+$('iDemo').onclick = () => { closeIntro(); srcDemo(); };
+$('iFile').onclick = () => { $('fileIn').click(); };
+$('bFile').onclick = () => { $('fileIn').click(); };
+function closeIntro(){ $('intro').hidden = true; }
+
+/* file input + drag and drop */
+{
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'audio/*,video/*'; inp.id = 'fileIn'; inp.hidden = true;
+  document.body.appendChild(inp);
+  inp.onchange = () => { if(inp.files[0]){ closeIntro(); srcFile(inp.files[0]); } };
+  let dragDepth = 0;
+  addEventListener('dragenter', e => { e.preventDefault(); if(++dragDepth === 1) document.body.classList.add('dragging'); });
+  addEventListener('dragover', e => e.preventDefault());
+  addEventListener('dragleave', () => { if(--dragDepth <= 0){ dragDepth = 0; document.body.classList.remove('dragging'); } });
+  addEventListener('drop', e => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+    const f = e.dataTransfer.files[0];
+    if(f){ closeIntro(); srcFile(f); }
+  });
+  $('player').addEventListener('ended', () => toast('Track finished'));
+}
+
+/* MIDI: the first eight CC knobs drive a0…a7, live in every expression */
+$('bMidi').onclick = async () => {
+  if(!navigator.requestMIDIAccess) return toast('WebMIDI is not available in this browser');
+  try{
+    const acc = await navigator.requestMIDIAccess();
+    acc.inputs.forEach(inp => inp.onmidimessage = ev => {
+      const [st, cc, val] = ev.data;
+      if((st & 0xF0) === 0xB0 && cc >= 1 && cc <= 8) midiCC[cc-1] = val / 127;
+      if((st & 0xF0) === 0x90 && val > 0) ptr.burst = 1;
+    });
+    $('bMidi').classList.add('on');
+    toast('MIDI on — CC 1…8 drive a0…a7');
+  }catch(e){ toast('MIDI permission refused'); }
+};
+$('bTilt').onclick = async () => {
+  const D = window.DeviceOrientationEvent;
+  if(!D) return toast('No orientation sensor here');
+  if(typeof D.requestPermission === 'function'){
+    try{ if(await D.requestPermission() !== 'granted') return toast('Tilt permission refused'); }
+    catch(e){ return toast('Tilt permission refused'); }
+  }
+  tilt.on = true; $('bTilt').classList.add('on');
+  addEventListener('deviceorientation', ev => {
+    if(!tilt.on) return;
+    tilt.x = Math.max(-1, Math.min(1, (ev.gamma || 0) / 45));
+    tilt.y = Math.max(-1, Math.min(1, (ev.beta || 0) / 45));
+    ptr.x = tilt.x * (R.w / R.h); ptr.y = -tilt.y; ptr.down = 0.55;
+  });
+  toast('Tilt on — steer with the handset');
+};
+$('bOsc').onclick = oscToggle;
+function pollPads(){
+  if(!navigator.getGamepads) return;
+  const pads = navigator.getGamepads();
+  for(const g of pads){
+    if(!g || !g.axes || g.axes.length < 2) continue;
+    const dz = v => Math.abs(v) < 0.14 ? 0 : v;
+    const lx = dz(g.axes[0]), ly = dz(g.axes[1]);
+    if(lx || ly){ ptr.x = lx * (R.w/R.h); ptr.y = -ly; ptr.down = 1; }
+    if(g.axes.length >= 4){
+      const rx = dz(g.axes[2]), ry = dz(g.axes[3]);
+      if(rx) P.spin = Math.max(-2, Math.min(2, P.spin + rx * 0.01));
+      if(ry) P.zoom = Math.max(-0.5, Math.min(0.5, P.zoom + ry * 0.004));
+    }
+    if(g.buttons && g.buttons[0] && g.buttons[0].pressed) ptr.burst = 1;
+    break;
+  }
+}
+
+/* ============================================================================
+   Boot
+   ========================================================================== */
+buildStatic();
+resize();
+if(!loadHash()) applyPreset(0);
+syncUI(); syncSourceUI();
+addEventListener('resize', () => { adaptScale = 1; resize(); });
+addEventListener('visibilitychange', () => { T.last = 0; });
+if(!CAN_FLOAT_RT) toast('No float render targets — trails will band a little on this GPU');
+requestAnimationFrame(frame);
+
+/* start the demo automatically once the user touches anything, and offer the
+   intro until then (autoplay policy means we cannot make noise unprompted) */
+{
+  const kick = () => { if(A.kind === 'none'){ srcDemo(); } closeIntro(); };
+  $('intro').addEventListener('click', e => { if(e.target.id === 'intro'){ kick(); } });
+  addEventListener('keydown', e => { if(!$('intro').hidden && e.key === 'Enter') kick(); }, { once:false });
+}
+console.log('%cChromaflow', 'font:600 16px system-ui', '— homage to SoundSpectrum G-Force / WhiteCap / Aeon.', RENDERER);
+</script>
+</body>
+</html>
