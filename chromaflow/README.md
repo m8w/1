@@ -60,6 +60,23 @@ browsers or back them up before clearing site data. *Copy share link* packs
 one look — every expression and every changed knob — into a URL instead;
 nothing in any of this is ever uploaded.
 
+**Syncing other software over OSC.** Input tab → *Sync out (OSC)* sends
+`bass mid treb level mag beat bpm hue phase preset` out live, at ~25 Hz, so an
+openFrameworks sketch, TouchDesigner, Max/MSP or Pure Data patch can react to
+the same music Chromaflow is reacting to. Browsers can't open a raw UDP
+socket, so this speaks OSC-over-WebSocket to a small bridge that ships beside
+the page:
+
+```bash
+node web/osc-bridge.js                          # ws://127.0.0.1:8081 -> udp://127.0.0.1:9000
+node web/osc-bridge.js --osc-host 10.0.0.5 --osc-port 12000   # a machine on the network
+```
+
+No npm install — it's built only from Node's own `http`, `crypto` and `dgram`
+modules. Point Chromaflow's OSC URL at the bridge's `ws://` address, hit
+*Connect*, and the messages arrive as real OSC on the port your other software
+is already listening on.
+
 ## Writing a look
 
 The Code tab edits five expressions and recompiles the shader as you type. This
@@ -212,6 +229,7 @@ the same slice regardless of how long it actually took to draw.
 
 ```
 web/index.html        the real-time WebGL2 build — one file, no dependencies
+web/osc-bridge.js     OSC-over-WebSocket -> real OSC-over-UDP, no npm install
 chromaflow/expr.py    the expression language: parse once, run as NumPy or GLSL
 chromaflow/analysis.py  bands, onsets, tempo, chroma
 chromaflow/canvas.py  the PythonCanvas-shaped drawing API

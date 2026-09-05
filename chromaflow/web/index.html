@@ -282,6 +282,15 @@ body.dragging #drop{display:grid}
     </div>
     <p class="hint" id="ctlHint">Pointer drags push the flow field; a click detonates. Gamepad sticks steer
       spin&nbsp;/&nbsp;zoom automatically when one is connected.</p>
+
+    <h4>Sync out (OSC)</h4>
+    <input type="text" id="oscUrl" value="ws://127.0.0.1:8081" style="width:100%;margin-bottom:6px">
+    <button id="bOsc" class="chip" style="width:100%">🔌 Connect OSC bridge</button>
+    <p class="hint">Sends <code>bass mid treb level mag beat bpm hue phase preset</code> out live, to sync an
+      openFrameworks sketch, TouchDesigner, Max/MSP or Pure Data to the same music. Browsers can't open raw
+      UDP sockets, so run the small bridge that ships beside this file first:
+      <code>node osc-bridge.js</code> — by default it forwards to <code>udp://127.0.0.1:9000</code>
+      (override with <code>--osc-host</code> / <code>--osc-port</code>).</p>
   </div>
 </div>
 
@@ -344,6 +353,11 @@ body.dragging #drop{display:grid}
       <i>My presets</i> to reload with a click, or <i>Export all</i>/<i>Import</i> to move designs between
       browsers as JSON. <i>Copy share link</i> packs one look into a URL instead. Nothing here is ever
       uploaded.</p>
+    <h3>Syncing other software (OSC)</h3>
+    <p>Input tab → <i>Sync out (OSC)</i> sends bass/mid/treb/level/mag/beat/bpm/hue/phase/preset out live,
+      so an openFrameworks sketch, TouchDesigner, Max/MSP or Pure Data patch can react to the same music.
+      Browsers can't open raw UDP, so run the small bridge that ships beside this file first —
+      <code>node osc-bridge.js</code> — then connect to its <code>ws://</code> address here.</p>
     <h3>Credit where it is due</h3>
     <p>Chromaflow is an independent, from-scratch homage to the visualizers made by
       <a href="https://www.soundspectrum.com/" target="_blank" rel="noopener noreferrer">SoundSpectrum</a> —
@@ -1426,6 +1440,7 @@ function applyPreset(ix, keepCode){
   buildPalette(P.pal);
   rebuild();
   syncUI();
+  sendOSC('/chromaflow/preset', 's', pr.name);
 }
 
 /* ============================================================================
@@ -1439,6 +1454,53 @@ const ptr = { x:0, y:0, down:0, burst:0, vx:0, vy:0, active:false };
 const midiCC = new Float32Array(8); midiCC[0] = midiCC[1] = 0.5;
 const tilt = { on:false, x:0, y:0 };
 let adaptScale = 1, frameMs = 16, dpr = 1, cssW = 1, cssH = 1;
+
+/* ============================================================================
+   OSC output — real-time sync out to openFrameworks, TouchDesigner, Max/MSP,
+   Pure Data, or anything else that speaks OSC.  Browsers cannot open a raw UDP
+   socket, so this speaks OSC-over-WebSocket to the small bridge in
+   osc-bridge.js, which is the part that actually puts the bytes on UDP.  The
+   wire format the bridge forwards is real, standard OSC — encoded here so
+   nothing on the far end needs to know a browser was ever involved. */
+const OSC = { ws:null, connected:false, nextAt:0 };
+function oscString(str){
+  const bytes = []; for(let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i) & 0xff);
+  const nullCount = 4 - (bytes.length % 4);
+  for(let i = 0; i < nullCount; i++) bytes.push(0);
+  return new Uint8Array(bytes);
+}
+function encodeOSC(address, tag, value){
+  const addr = oscString(address), tags = oscString(',' + tag);
+  const argBuf = new ArrayBuffer(4), dv = new DataView(argBuf);
+  if(tag === 'f') dv.setFloat32(0, value, false);
+  else if(tag === 'i') dv.setInt32(0, value | 0, false);
+  const arg = tag === 's' ? oscString(String(value)) : new Uint8Array(argBuf);
+  const out = new Uint8Array(addr.length + tags.length + arg.length);
+  out.set(addr, 0); out.set(tags, addr.length); out.set(arg, addr.length + tags.length);
+  return out;
+}
+function sendOSC(address, tag, value){
+  if(!OSC.connected || !OSC.ws || OSC.ws.readyState !== 1) return;
+  try{ OSC.ws.send(encodeOSC(address, tag, value)); }catch(e){}
+}
+function oscToggle(){
+  if(OSC.ws){ OSC.ws.close(); return; }
+  const url = $('oscUrl').value.trim();
+  let ws;
+  try{ ws = new WebSocket(url); }catch(e){ return toast('Not a valid WebSocket URL'); }
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    OSC.connected = true;
+    $('bOsc').textContent = '🔌 Disconnect OSC'; $('bOsc').classList.add('on');
+    toast('OSC bridge connected');
+  };
+  ws.onclose = () => {
+    OSC.connected = false; OSC.ws = null;
+    $('bOsc').textContent = '🔌 Connect OSC bridge'; $('bOsc').classList.remove('on');
+  };
+  ws.onerror = () => toast('OSC bridge unreachable — is osc-bridge.js running?');
+  OSC.ws = ws;
+}
 
 function fieldCoords(ev){
   const rect = cv.getBoundingClientRect();
@@ -1569,6 +1631,7 @@ function randomise(){
 }
 function onBeat(){
   beatCount++;
+  sendOSC('/chromaflow/beat', 'f', 1.0);
   if(autoVJ && beatCount % 32 === 0){ applyPreset(presetIx + 1); toast('Auto-VJ → ' + PRESETS[presetIx].name); }
 }
 
@@ -1616,6 +1679,17 @@ function frame(now){
   const t0 = performance.now();
   A.gain = P.gain;
   analyse(dt, now);
+  if(OSC.connected && now >= OSC.nextAt){
+    OSC.nextAt = now + 0.04;                       /* ~25 Hz — plenty for visual sync, not flooding UDP */
+    sendOSC('/chromaflow/bass', 'f', A.bass);
+    sendOSC('/chromaflow/mid', 'f', A.mid);
+    sendOSC('/chromaflow/treb', 'f', A.treb);
+    sendOSC('/chromaflow/level', 'f', A.level);
+    sendOSC('/chromaflow/mag', 'f', A.mag);
+    sendOSC('/chromaflow/bpm', 'f', A.bpm);
+    sendOSC('/chromaflow/hue', 'f', A.hue);
+    sendOSC('/chromaflow/phase', 'f', A.beatPhase);
+  }
   resize();
   allocParticles(PART_DIMS[P.pcount | 0]);
   ptr.burst = Math.max(0, ptr.burst - dt * 2.2);
@@ -2048,6 +2122,7 @@ $('bTilt').onclick = async () => {
   });
   toast('Tilt on — steer with the handset');
 };
+$('bOsc').onclick = oscToggle;
 function pollPads(){
   if(!navigator.getGamepads) return;
   const pads = navigator.getGamepads();
