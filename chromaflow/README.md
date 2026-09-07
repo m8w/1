@@ -234,7 +234,7 @@ chromaflow/expr.py    the expression language: parse once, run as NumPy or GLSL
 chromaflow/analysis.py  bands, onsets, tempo, chroma
 chromaflow/canvas.py  the PythonCanvas-shaped drawing API
 chromaflow/engine.py  advect, particles, wave, colour, post
-chromaflow/presets.py the eight stock looks, and the config-file reader
+chromaflow/presets.py the sixteen stock looks, and the config-file reader
 chromaflow/scene.py   loading and hot-reloading scene files
 chromaflow/cli.py     render / still / presets / web
 configs/              plain-text configs
